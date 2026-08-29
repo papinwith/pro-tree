@@ -1,0 +1,5 @@
+# Local secrets — never commit real API keys. Copy config/local.example.php
+# to config/local.php and fill in your own values there.
+config/local.php
+
+node_modules/
