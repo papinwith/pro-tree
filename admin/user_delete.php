@@ -3,6 +3,7 @@ require_once __DIR__ . '/../includes/auth.php';
 requirePermission('admin.manage');
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    requireCsrf();
     $id = (int) ($_POST['id'] ?? 0);
     $myId = (int) ($_SESSION['admin_id'] ?? 0);
 

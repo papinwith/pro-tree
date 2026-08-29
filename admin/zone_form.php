@@ -14,6 +14,7 @@ if ($id && !$zone) {
 $errors = [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    requireCsrf();
     // Thai only — EN/ZH are generated automatically on first public view in
     // that language and cached on this same row (see includes/translation.php),
     // so this form must never touch those columns.
@@ -112,6 +113,7 @@ $v = fn($key, $default = '') => e((string) ($zone[$key] ?? $default));
   <?php endforeach; ?>
 
   <form method="post">
+    <?= csrfField() ?>
     <label for="zone_code">รหัสโซน</label>
     <input type="text" id="zone_code" name="zone_code" value="<?= $v('zone_code') ?>" required placeholder="เช่น Z1">
 

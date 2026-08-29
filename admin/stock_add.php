@@ -6,6 +6,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     header('Location: species.php');
     exit;
 }
+requireCsrf();
 
 $pdo = db();
 $speciesId = (int) ($_POST['species_id'] ?? 0);

@@ -90,6 +90,7 @@ $topSpecies = $pdo->query(
           <td><?= e($r['contact_channel'] ?? '') ?></td>
           <td>
             <form class="inline-lead-form" method="post" action="interest_update.php">
+              <?= csrfField() ?>
               <input type="hidden" name="id" value="<?= (int) $r['id'] ?>">
               <input type="hidden" name="filter" value="<?= e($filter) ?>">
               <select name="lead_status" onchange="this.form.querySelector('input[name=contact_channel]').focus()">

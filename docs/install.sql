@@ -55,11 +55,13 @@ CREATE TABLE role_permissions (
 -- Admins (separate from visitor identity system entirely)
 -- ---------------------------------------------------------------
 CREATE TABLE admins (
-    id            BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    username      VARCHAR(100) NOT NULL UNIQUE,
-    password_hash VARCHAR(255) NOT NULL,
-    role_id       BIGINT UNSIGNED NOT NULL,
-    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    id                     BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    username               VARCHAR(100) NOT NULL UNIQUE,
+    password_hash          VARCHAR(255) NOT NULL,
+    role_id                BIGINT UNSIGNED NOT NULL,
+    failed_login_attempts  INT UNSIGNED NOT NULL DEFAULT 0,
+    locked_until           DATETIME NULL,
+    created_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_admins_role FOREIGN KEY (role_id) REFERENCES roles(id)
 ) ENGINE=InnoDB;
 
@@ -163,6 +165,21 @@ CREATE TABLE species (
     CONSTRAINT fk_species_category FOREIGN KEY (category_code) REFERENCES categories(code),
     CONSTRAINT fk_species_subtype  FOREIGN KEY (subtype_id)    REFERENCES subtypes(id),
     UNIQUE KEY uq_species_category_species (category_code, species_code)
+) ENGINE=InnoDB;
+
+-- ---------------------------------------------------------------
+-- Extra subtypes for a species that genuinely belongs to more than one
+-- "ชนิด" (e.g. both ไม้ผล and ไม้ดอก) — species.subtype_id above stays the
+-- one, required "primary" subtype (still what plant_code/organization uses);
+-- this table is purely additional tags, admin-side only. Deleting either
+-- side cleans these up automatically.
+-- ---------------------------------------------------------------
+CREATE TABLE species_subtypes (
+    species_id BIGINT UNSIGNED NOT NULL,
+    subtype_id BIGINT UNSIGNED NOT NULL,
+    PRIMARY KEY (species_id, subtype_id),
+    CONSTRAINT fk_species_subtypes_species FOREIGN KEY (species_id) REFERENCES species(id) ON DELETE CASCADE,
+    CONSTRAINT fk_species_subtypes_subtype FOREIGN KEY (subtype_id) REFERENCES subtypes(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 -- ---------------------------------------------------------------

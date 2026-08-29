@@ -28,3 +28,14 @@ if (!defined('GEMINI_API_KEY')) {
 // if (!defined('DEV_LOGIN_BYPASS')) {
 //     define('DEV_LOGIN_BYPASS', true);
 // }
+
+// Optional — force verbose in-browser PHP errors even when this isn't a
+// request from localhost (e.g. testing over a LAN IP/hostname). Requests
+// from 127.0.0.1/::1 already get verbose errors automatically with no
+// config needed; this is only for the "testing from another device on the
+// network" case. Never set this to 'local' on anything reachable from the
+// internet — it would leak stack traces (file paths, query text) to anyone
+// who can trigger an error.
+// if (!defined('APP_ENV')) {
+//     define('APP_ENV', 'local');
+// }

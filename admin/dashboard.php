@@ -61,6 +61,7 @@ if ($q !== '') {
     <a class="btn" href="tree_form.php">+ เพิ่มต้นไม้</a>
     <a class="btn" href="qr_all.php">พิมพ์ QR Code ทั้งหมด</a>
     <form id="bulkDeleteTrees" class="inline" method="post" action="tree_bulk_delete.php" data-confirm="ลบต้นไม้ที่เลือกทั้งหมดใช่หรือไม่?">
+      <?= csrfField() ?>
       <button class="btn btn-sm btn-danger" type="submit" data-bulk-submit="trees" disabled>ลบที่เลือก</button>
     </form>
   </div>
@@ -93,6 +94,7 @@ if ($q !== '') {
               <a class="btn-outline btn-sm" href="tree_form.php?id=<?= (int) $t['id'] ?>">แก้ไข</a>
               <a class="btn-outline btn-sm" href="tree_qr.php?id=<?= (int) $t['id'] ?>">QR</a>
               <form class="inline" method="post" action="tree_delete.php" data-confirm="ลบต้นไม้นี้ใช่หรือไม่?">
+                <?= csrfField() ?>
                 <input type="hidden" name="id" value="<?= (int) $t['id'] ?>">
                 <button class="btn btn-sm btn-danger" type="submit">ลบ</button>
               </form>

@@ -3,6 +3,7 @@ require_once __DIR__ . '/../includes/auth.php';
 requirePermission('category.manage');
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    requireCsrf();
     $id = (int) ($_POST['id'] ?? 0);
     $reassignTo = (int) ($_POST['reassign_to'] ?? 0);
     if ($id) {

@@ -5,6 +5,7 @@ requirePermission('tree.status.manage');
 $deleted = 0;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    requireCsrf();
     $ids = array_filter(array_map('intval', $_POST['ids'] ?? []));
     if ($ids) {
         $pdo = db();

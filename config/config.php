@@ -46,4 +46,46 @@ if (!defined('DEV_LOGIN_BYPASS')) {
     define('DEV_LOGIN_BYPASS', false);
 }
 
+// Error display — safe by default: a real deployment (any request that
+// isn't literally CLI or localhost) never shows a raw PHP error/stack
+// trace to the browser, no matter what php.ini on that host happens to
+// have display_errors set to. Local XAMPP dev keeps seeing errors inline
+// exactly as before, with no config needed — set APP_ENV=local in
+// config/local.php (gitignored) to force verbose errors from a non-localhost
+// address too (e.g. testing over a LAN IP), or APP_ENV=production to force
+// them off even from localhost.
+if (!defined('APP_ENV')) {
+    // REMOTE_ADDR alone isn't safe here: a reverse proxy (nginx/Apache in
+    // front of PHP-FPM on the same box — common on a single VPS) makes
+    // every real visitor look like 127.0.0.1 to PHP. A proxied request
+    // always carries one of these forwarding headers; a genuine local
+    // browser request never does, so their presence rules out "local"
+    // even when REMOTE_ADDR says loopback.
+    $isProxied = isset($_SERVER['HTTP_X_FORWARDED_FOR'])
+        || isset($_SERVER['HTTP_X_FORWARDED_HOST'])
+        || isset($_SERVER['HTTP_X_FORWARDED_PROTO'])
+        || isset($_SERVER['HTTP_X_REAL_IP']);
+    $isLocalRequest = PHP_SAPI === 'cli'
+        || (!$isProxied && in_array($_SERVER['REMOTE_ADDR'] ?? '', ['127.0.0.1', '::1'], true));
+    define('APP_ENV', getenv('APP_ENV') ?: ($isLocalRequest ? 'local' : 'production'));
+}
+
+if (APP_ENV === 'local') {
+    ini_set('display_errors', '1');
+    ini_set('display_startup_errors', '1');
+    error_reporting(E_ALL);
+} else {
+    ini_set('display_errors', '0');
+    ini_set('display_startup_errors', '0');
+    ini_set('log_errors', '1');
+    error_reporting(E_ALL);
+    set_exception_handler(function (Throwable $e): void {
+        error_log($e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine() . "\n" . $e->getTraceAsString());
+        if (!headers_sent()) {
+            http_response_code(500);
+        }
+        echo 'เกิดข้อผิดพลาดของระบบ กรุณาลองใหม่อีกครั้ง หรือแจ้งผู้ดูแลระบบ';
+    });
+}
+
 date_default_timezone_set('Asia/Bangkok');

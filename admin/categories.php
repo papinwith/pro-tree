@@ -26,12 +26,13 @@ $categories = $pdo->query(
   <div class="btn-row">
     <a class="btn" href="category_form.php">+ เพิ่มประเภทพืช</a>
     <form id="bulkDeleteCategories" class="inline" method="post" action="category_bulk_delete.php" data-confirm="ลบประเภทพืชที่เลือกทั้งหมดใช่หรือไม่? (รายการที่ยังมีชนิดพันธุ์ผูกอยู่จะถูกข้าม)">
+      <?= csrfField() ?>
       <button class="btn btn-sm btn-danger" type="submit" data-bulk-submit="categories" disabled>ลบที่เลือก</button>
     </form>
   </div>
 
   <?php if (isset($_GET['bulk_deleted'])): ?>
-    <div class="flash">
+    <div class="flash<?= (int) ($_GET['bulk_skipped'] ?? 0) > 0 ? ' warning' : '' ?>">
       ลบประเภทพืชที่เลือกแล้ว <?= (int) $_GET['bulk_deleted'] ?> รายการ
       <?php if ((int) ($_GET['bulk_skipped'] ?? 0) > 0): ?>
         (ข้าม <?= (int) $_GET['bulk_skipped'] ?> รายการที่ยังมีชนิดพันธุ์ผูกอยู่ — ใช้ปุ่ม "ลบ" รายแถวเพื่อย้ายชนิดพันธุ์ก่อนลบ)
@@ -54,11 +55,13 @@ $categories = $pdo->query(
             <a class="btn-outline btn-sm" href="category_form.php?code=<?= urlencode($c['code']) ?>">แก้ไข</a>
             <?php if ((int) $c['species_count'] === 0): ?>
             <form class="inline" method="post" action="category_delete.php" data-confirm="ลบประเภทพืชนี้ใช่หรือไม่?">
+              <?= csrfField() ?>
               <input type="hidden" name="code" value="<?= e($c['code']) ?>">
               <button class="btn btn-sm btn-danger" type="submit">ลบ</button>
             </form>
             <?php else: ?>
             <form class="inline" method="post" action="category_delete.php" data-confirm="ย้ายชนิดพันธุ์ทั้งหมดไปประเภทที่เลือก แล้วลบประเภทนี้ใช่หรือไม่?">
+              <?= csrfField() ?>
               <input type="hidden" name="code" value="<?= e($c['code']) ?>">
               <select name="reassign_to" required title="ย้ายชนิดพันธุ์ไปประเภทนี้ก่อนลบ">
                 <option value="">— ย้ายชนิดพันธุ์ไปที่ —</option>

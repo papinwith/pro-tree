@@ -13,6 +13,7 @@ if ($code !== '' && !$category) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    requireCsrf();
     $nameTh = trim($_POST['name_th'] ?? '');
     if ($nameTh === '') {
         $errors[] = 'กรุณาระบุชื่อ';
@@ -52,6 +53,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   <?php endforeach; ?>
 
   <form method="post">
+    <?= csrfField() ?>
     <label for="name_th">ชื่อ (ไทย)</label>
     <input type="text" id="name_th" name="name_th" value="<?= e($category['name_th'] ?? ($_POST['name_th'] ?? '')) ?>" required autofocus>
 

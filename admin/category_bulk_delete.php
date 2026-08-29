@@ -6,6 +6,7 @@ $deleted = 0;
 $skipped = 0;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    requireCsrf();
     $codes = array_filter(array_map('trim', $_POST['codes'] ?? []), fn($c) => $c !== '');
     if ($codes) {
         $pdo = db();

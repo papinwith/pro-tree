@@ -6,6 +6,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     header('Location: interests.php');
     exit;
 }
+requireCsrf();
 
 $pdo = db();
 $id = (int) ($_POST['id'] ?? 0);

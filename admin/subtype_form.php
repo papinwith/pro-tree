@@ -14,6 +14,7 @@ if ($id && !$subtype) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    requireCsrf();
     $nameTh = trim($_POST['name_th'] ?? '');
     if ($nameTh === '') {
         $errors[] = 'กรุณาระบุชื่อ';
@@ -87,6 +88,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   <?php endforeach; ?>
 
   <form method="post">
+    <?= csrfField() ?>
     <label for="name_th">ชื่อชนิด (ไทย)</label>
     <input type="text" id="name_th" name="name_th" value="<?= e($subtype['name_th'] ?? '') ?>" required autofocus placeholder="เช่น ไม้ผล, ไม้ดอก, ไม้ประดับ">
 

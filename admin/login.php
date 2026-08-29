@@ -6,6 +6,7 @@ $pdo = db();
 
 $error = null;
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    requireCsrf();
     if (isset($_POST['dev_bypass_admin_id'])) {
         // Only ever does anything if devLoginBypassAllowed() is true —
         // see includes/auth.php. A forged POST from anywhere else just
@@ -18,11 +19,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $username = trim($_POST['username'] ?? '');
         $password = $_POST['password'] ?? '';
-        if (attemptAdminLogin($pdo, $username, $password)) {
+        $error = attemptAdminLogin($pdo, $username, $password);
+        if ($error === null) {
             header('Location: ' . adminHomeUrl());
             exit;
         }
-        $error = 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง';
     }
 }
 
@@ -48,6 +49,7 @@ if (devLoginBypassAllowed()) {
   <h1>เข้าสู่ระบบผู้ดูแล</h1>
   <?php if ($error): ?><div class="flash error"><?= e($error) ?></div><?php endif; ?>
   <form method="post">
+    <?= csrfField() ?>
     <label for="username">ชื่อผู้ใช้</label>
     <input type="text" id="username" name="username" required autofocus>
     <label for="password">รหัสผ่าน</label>
@@ -62,6 +64,7 @@ if (devLoginBypassAllowed()) {
     <div class="btn-row">
       <?php foreach ($devAdmins as $a): ?>
         <form method="post" class="inline">
+          <?= csrfField() ?>
           <input type="hidden" name="dev_bypass_admin_id" value="<?= (int) $a['id'] ?>">
           <button class="btn-outline btn-sm" type="submit"><?= e($a['username']) ?> (<?= e($a['role_name']) ?>)</button>
         </form>

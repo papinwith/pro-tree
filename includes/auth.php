@@ -9,11 +9,25 @@ function startAdminSession(): void
         // SameSite or cookie_path there is what let this cookie silently
         // fail to round-trip in some browsers, forcing a fresh login on
         // every single navigation.
+        // Only mark the cookie Secure when the request actually arrived over
+        // HTTPS — hardcoding true would break local XAMPP dev over plain
+        // HTTP (the browser silently drops a Secure cookie on a non-HTTPS
+        // origin), and hardcoding false would let the session cookie travel
+        // over plain HTTP on a real deployment.
+        $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+            || ($_SERVER['SERVER_PORT'] ?? null) == 443;
+        // Also raise server-side GC's own idea of session lifetime to match
+        // — php.ini's session.gc_maxlifetime defaults to 1440s (24 min) on
+        // most installs, which would let an idle admin's session file get
+        // garbage-collected (forcing a surprise re-login) long before the
+        // midnight cutoff the cookie above promises.
+        $secondsUntilMidnight = secondsUntilBangkokMidnight();
+        ini_set('session.gc_maxlifetime', (string) $secondsUntilMidnight);
         session_set_cookie_params([
-            'lifetime' => 0,
+            'lifetime' => $secondsUntilMidnight,
             'path' => '/',
             'domain' => '',
-            'secure' => false,
+            'secure' => $isHttps,
             'httponly' => true,
             'samesite' => 'Lax',
         ]);
@@ -21,9 +35,34 @@ function startAdminSession(): void
     }
 }
 
+/**
+ * Every admin is logged out together at midnight Bangkok time, not on a
+ * rolling N-hours-since-login basis — the cookie's own expiry is a first
+ * pass, but browsers don't always honor it precisely (an already-open tab
+ * keeps sending a cookie the OS hasn't purged yet), so this is the actual
+ * enforcement: session data itself is wiped the first request after the
+ * date (Asia/Bangkok) has rolled over from the one recorded at login.
+ */
+function secondsUntilBangkokMidnight(): int
+{
+    $tz = new DateTimeZone('Asia/Bangkok');
+    $now = new DateTime('now', $tz);
+    $nextMidnight = (new DateTime('tomorrow', $tz));
+    return max(1, $nextMidnight->getTimestamp() - $now->getTimestamp());
+}
+
+function bangkokToday(): string
+{
+    return (new DateTime('now', new DateTimeZone('Asia/Bangkok')))->format('Y-m-d');
+}
+
 function adminLoggedIn(): bool
 {
     startAdminSession();
+    if (!empty($_SESSION['admin_id']) && ($_SESSION['admin_session_day'] ?? null) !== bangkokToday()) {
+        adminLogout();
+        return false;
+    }
     return !empty($_SESSION['admin_id']);
 }
 
@@ -76,6 +115,43 @@ function requirePermission(string $permissionKey): void
 }
 
 /**
+ * One CSRF token per session, not per form — regenerating per-form breaks
+ * back/forward navigation and multiple tabs open on different admin forms
+ * at once. Session-scoped is the standard tradeoff for a same-site admin
+ * panel like this one.
+ */
+function csrfToken(): string
+{
+    startAdminSession();
+    if (empty($_SESSION['csrf_token'])) {
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+    }
+    return $_SESSION['csrf_token'];
+}
+
+/** Hidden input to drop inside every <form method="post">. */
+function csrfField(): string
+{
+    return '<input type="hidden" name="csrf_token" value="' . e(csrfToken()) . '">';
+}
+
+/**
+ * Call as the first line of every POST handler in admin/*.php, before
+ * touching $_POST for anything else. Rejects the request outright rather
+ * than falling through, so a missing/forged token can't reach any DB write.
+ */
+function requireCsrf(): void
+{
+    startAdminSession();
+    $submitted = $_POST['csrf_token'] ?? '';
+    if (!is_string($submitted) || empty($_SESSION['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $submitted)) {
+        http_response_code(400);
+        echo 'คำขอไม่ถูกต้องหรือหมดอายุ (CSRF token ไม่ถูกต้อง) กรุณาย้อนกลับและลองใหม่';
+        exit;
+    }
+}
+
+/**
  * True only when DEV_LOGIN_BYPASS is on AND the request is actually
  * arriving from localhost — a second, independent check so a stray
  * DEV_LOGIN_BYPASS=true in the wrong place (an env var leaked to a real
@@ -113,24 +189,75 @@ function devBypassLogin(PDO $pdo, int $adminId): bool
     $_SESSION['admin_id'] = (int) $admin['id'];
     $_SESSION['admin_username'] = $admin['username'];
     $_SESSION['admin_role_id'] = (int) $admin['role_id'];
+    $_SESSION['admin_session_day'] = bangkokToday();
     return true;
 }
 
-function attemptAdminLogin(PDO $pdo, string $username, string $password): bool
+const LOGIN_LOCKOUT_THRESHOLD = 5;
+const LOGIN_LOCKOUT_MINUTES = 15;
+
+/**
+ * Unlimited password guesses against a known username was the gap here —
+ * lock the account for LOGIN_LOCKOUT_MINUTES after LOGIN_LOCKOUT_THRESHOLD
+ * consecutive failures. Counts per-account (not per-IP): simpler, needs no
+ * extra table, and still stops the realistic threat (guessing one admin's
+ * password) even though it can't stop someone spraying many usernames from
+ * one IP — that's a smaller risk here since usernames aren't public.
+ *
+ * One SELECT does both the lock check and the credential fetch (not two
+ * separate queries), and the failure path is a single atomic UPDATE rather
+ * than a read-modify-write — MySQL evaluates a single-table UPDATE's SET
+ * clauses left to right, so `locked_until` below sees failed_login_attempts'
+ * own just-incremented value (not the pre-update one) without needing to
+ * add 1 again itself. A read-then-write here would let concurrent guesses
+ * race the counter and take far more than LOGIN_LOCKOUT_THRESHOLD tries to
+ * actually lock.
+ *
+ * Returns null on success (session is set up); otherwise a Thai message
+ * for admin/login.php to show as-is (either the lockout notice or the
+ * generic invalid-credentials one).
+ */
+function attemptAdminLogin(PDO $pdo, string $username, string $password): ?string
 {
-    $stmt = $pdo->prepare('SELECT id, password_hash, role_id FROM admins WHERE username = :u');
+    $stmt = $pdo->prepare(
+        'SELECT id, password_hash, role_id, failed_login_attempts, locked_until FROM admins WHERE username = :u'
+    );
     $stmt->execute(['u' => $username]);
     $admin = $stmt->fetch();
 
+    if ($admin && $admin['locked_until'] && strtotime($admin['locked_until']) > time()) {
+        $minutes = (int) ceil((strtotime($admin['locked_until']) - time()) / 60);
+        return "บัญชีนี้ถูกล็อกชั่วคราวจากการเข้าสู่ระบบผิดพลาดหลายครั้ง กรุณาลองใหม่ใน {$minutes} นาที";
+    }
+
     if ($admin && password_verify($password, $admin['password_hash'])) {
+        if ((int) $admin['failed_login_attempts'] > 0 || $admin['locked_until']) {
+            $pdo->prepare('UPDATE admins SET failed_login_attempts = 0, locked_until = NULL WHERE id = :id')
+                ->execute(['id' => $admin['id']]);
+        }
         startAdminSession();
         session_regenerate_id(true);
         $_SESSION['admin_id'] = (int) $admin['id'];
         $_SESSION['admin_username'] = $username;
         $_SESSION['admin_role_id'] = (int) $admin['role_id'];
-        return true;
+        $_SESSION['admin_session_day'] = bangkokToday();
+        return null;
     }
-    return false;
+
+    if ($admin) {
+        $pdo->prepare(
+            'UPDATE admins
+             SET failed_login_attempts = failed_login_attempts + 1,
+                 locked_until = IF(failed_login_attempts >= :threshold,
+                                    DATE_ADD(NOW(), INTERVAL :minutes MINUTE), locked_until)
+             WHERE id = :id'
+        )->execute([
+            'threshold' => LOGIN_LOCKOUT_THRESHOLD,
+            'minutes' => LOGIN_LOCKOUT_MINUTES,
+            'id' => $admin['id'],
+        ]);
+    }
+    return 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง';
 }
 
 function adminLogout(): void

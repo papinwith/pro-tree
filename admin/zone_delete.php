@@ -3,6 +3,7 @@ require_once __DIR__ . '/../includes/auth.php';
 requirePermission('zone.manage');
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    requireCsrf();
     $id = (int) ($_POST['id'] ?? 0);
     if ($id) {
         $pdo = db();

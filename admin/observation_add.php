@@ -6,6 +6,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     header('Location: dashboard.php');
     exit;
 }
+requireCsrf();
 
 $pdo = db();
 $treeId = (int) ($_POST['tree_id'] ?? 0);

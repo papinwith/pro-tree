@@ -16,6 +16,7 @@ $categories = getAllCategories($pdo);
 $subtypes = getAllSubtypes($pdo);
 $zones = getAllZones($pdo);
 $stockRows = $id ? getStockForSpecies($pdo, $id) : [];
+$extraSubtypeIds = $id ? getExtraSubtypeIdsForSpecies($pdo, $id) : [];
 $saleStatusLabels = ['available' => 'พร้อมขาย', 'reserved' => 'จองแล้ว', 'sold_out' => 'ขายหมด', 'not_for_sale' => 'ไม่ขาย'];
 
 // Thai-only fields. English/Chinese are never entered here — they're
@@ -32,11 +33,29 @@ $detailSections = [
 ];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    requireCsrf();
     // Category is its own required choice (subtype_form.php lets a subtype
     // exist without a category yet — "เพิ่มชนิด" only asks for a name — so
     // it can't always be relied on to supply the category here).
     $categoryCode = trim($_POST['category_code'] ?? '');
-    $subtypeId = (int) ($_POST['subtype_id'] ?? 0);
+    // The "ชนิด" list is a multi-select — a species that's genuinely both
+    // e.g. ไม้ผล and ไม้ดอก picks more than one option directly in it,
+    // Ctrl/Cmd-click. Whichever comes first (list order) becomes the
+    // required "primary" subtype that plant_code/category assignment still
+    // uses; the rest are purely organizational tags (species_subtypes in
+    // docs/install.sql).
+    $validSubtypeIds = array_column($subtypes, 'id');
+    $selectedSubtypeIds = array_values(array_intersect(
+        array_unique(array_filter(array_map('intval', $_POST['subtype_id'] ?? []))),
+        $validSubtypeIds
+    ));
+    $subtypeId = $selectedSubtypeIds[0] ?? 0;
+    // Only ids that actually exist in `subtypes` reach here (filtered
+    // above) — an id for an already-deleted subtype (stale browser state,
+    // or a tampered form) is silently dropped instead of hitting the
+    // species_subtypes foreign key and surfacing as a misleading "someone
+    // else just saved this" conflict error.
+    $extraSubtypeIds = array_slice($selectedSubtypeIds, 1);
     $subtype = $subtypeId ? getSubtypeById($pdo, $subtypeId) : null;
     // species_code / classification_id are never admin-entered (see the
     // form below) — a hidden field carries the existing value forward on
@@ -121,6 +140,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $speciesId = (int) $pdo->lastInsertId();
             }
 
+            setExtraSubtypesForSpecies($pdo, $speciesId, $extraSubtypeIds, $subtypeId);
+
             // First time this subtype is actually used for a species — link
             // it to the chosen category permanently (subtype_form.php's
             // "เพิ่มชนิด" never asks for one, so this is how most subtypes
@@ -200,6 +221,7 @@ $currentClassificationId = $species['classification_id'] ?? '';
   <?php else: ?>
 
   <form method="post">
+    <?= csrfField() ?>
     <label for="category_code">ประเภทพืช</label>
     <select id="category_code" name="category_code" required onchange="filterSubtypesByCategory(this.value)">
       <option value="">— เลือกประเภทพืช —</option>
@@ -210,16 +232,25 @@ $currentClassificationId = $species['classification_id'] ?? '';
       <?php endforeach; ?>
     </select>
 
-    <label for="subtype_id">ชนิด</label>
-    <select id="subtype_id" name="subtype_id" required>
-      <option value="">— เลือกชนิด —</option>
+    <?php
+      $subtypesById = array_column($subtypes, null, 'id');
+      $selectedSubtypeIds = array_values(array_unique(array_filter(array_merge([(int) ($species['subtype_id'] ?? 0)], $extraSubtypeIds))));
+    ?>
+    <label for="subtype_picker">ชนิด (เลือกทีละรายการ — เลือกได้มากกว่า 1 ถ้าต้นนี้จัดอยู่ได้หลายชนิด รายการแรกที่เลือกจะเป็นชนิดหลัก)</label>
+    <select id="subtype_picker">
+      <option value="">— เลือกชนิดเพื่อเพิ่ม —</option>
       <?php foreach ($subtypes as $st): ?>
-        <option value="<?= (int) $st['id'] ?>" data-category="<?= e($st['category_code'] ?? '') ?>"
-          <?= (int) ($species['subtype_id'] ?? 0) === (int) $st['id'] ? 'selected' : '' ?>>
+        <option value="<?= (int) $st['id'] ?>" data-category="<?= e($st['category_code'] ?? '') ?>" data-name="<?= e($st['name_th']) ?>">
           <?= e($st['name_th']) ?><?= $st['category_code'] === null ? ' (ยังไม่กำหนดประเภท)' : '' ?>
         </option>
       <?php endforeach; ?>
     </select>
+    <div id="subtype_selected_box" class="chip-box"></div>
+    <div id="subtype_hidden_inputs">
+      <?php foreach ($selectedSubtypeIds as $sid): if (isset($subtypesById[$sid])): ?>
+        <input type="hidden" name="subtype_id[]" value="<?= (int) $sid ?>">
+      <?php endif; endforeach; ?>
+    </div>
     <p class="field-hint">โครงสร้าง: ประเภท &rarr; ชนิด &rarr; ชื่อต้นไม้ — จัดการรายการได้ที่ <a href="categories.php">ประเภทพืช</a> และ <a href="subtypes.php">ชนิด</a> เลือกชนิดที่ "ยังไม่กำหนดประเภท" ได้เลย ระบบจะผูกเข้ากับประเภทที่เลือกไว้ด้านบนให้อัตโนมัติตอนบันทึก</p>
 
     <?php // รหัสชนิดพืช / รหัสจำแนกพันธุ์ — รหัสภายในของระบบ ไม่ต้องให้ Admin เห็นหรือกรอกเอง
@@ -272,19 +303,106 @@ $currentClassificationId = $species['classification_id'] ?? '';
   </form>
 
   <script>
-  function filterSubtypesByCategory(categoryCode) {
-    var select = document.getElementById('subtype_id');
-    var options = select.querySelectorAll('option[value]:not([value=""])');
-    options.forEach(function (opt) {
-      // A subtype with no category yet (empty data-category) stays
-      // selectable under any category — picking it links it to whichever
-      // category is chosen here (see species_form.php's save handler).
-      opt.hidden = !!categoryCode && !!opt.dataset.category && opt.dataset.category !== categoryCode;
+  // "ชนิด" picker: pick one at a time from the dropdown, it becomes a chip
+  // in the box below with an X to remove it (e.g. picked the wrong one).
+  // The actual submitted values are the hidden subtype_id[] inputs, rebuilt
+  // from `selected` on every change — order of `selected` is add-order, and
+  // the first one is what species_form.php's save handler treats as the
+  // required "primary" subtype.
+  var subtypePicker = (function () {
+    var picker = document.getElementById('subtype_picker');
+    var box = document.getElementById('subtype_selected_box');
+    var hiddenContainer = document.getElementById('subtype_hidden_inputs');
+    var metaById = {};
+    picker.querySelectorAll('option[value]:not([value=""])').forEach(function (opt) {
+      metaById[opt.value] = { name: opt.dataset.name, category: opt.dataset.category || '' };
     });
-    var current = select.options[select.selectedIndex];
-    if (current && current.hidden) {
-      select.value = '';
+
+    // Seed `selected` from the hidden inputs PHP already rendered (existing
+    // species being edited), so the chip UI reflects it without duplicating
+    // that list server- and client-side.
+    var selected = Array.prototype.map.call(
+      hiddenContainer.querySelectorAll('input[name="subtype_id[]"]'),
+      function (input) {
+        var meta = metaById[input.value];
+        return { id: input.value, name: meta ? meta.name : input.value };
+      }
+    );
+
+    function render() {
+      box.innerHTML = '';
+      hiddenContainer.innerHTML = '';
+      if (!selected.length) {
+        var empty = document.createElement('span');
+        empty.className = 'muted-note';
+        empty.textContent = 'ยังไม่ได้เลือกชนิด';
+        box.appendChild(empty);
+      }
+      selected.forEach(function (item, idx) {
+        var chip = document.createElement('span');
+        chip.className = 'subtype-chip';
+        chip.textContent = (idx === 0 ? '★ ' : '') + item.name;
+
+        var removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'subtype-chip-remove';
+        removeBtn.textContent = '×';
+        removeBtn.setAttribute('aria-label', 'ลบ ' + item.name);
+        removeBtn.addEventListener('click', function () {
+          selected = selected.filter(function (s) { return s.id !== item.id; });
+          render();
+        });
+        chip.appendChild(removeBtn);
+        box.appendChild(chip);
+
+        var hidden = document.createElement('input');
+        hidden.type = 'hidden';
+        hidden.name = 'subtype_id[]';
+        hidden.value = item.id;
+        hiddenContainer.appendChild(hidden);
+      });
     }
+
+    picker.addEventListener('change', function () {
+      var id = picker.value;
+      if (!id) return;
+      if (!selected.some(function (s) { return s.id === id; })) {
+        var meta = metaById[id];
+        selected.push({ id: id, name: meta ? meta.name : id });
+      }
+      picker.value = '';
+      render();
+    });
+
+    function filterByCategory(categoryCode) {
+      picker.querySelectorAll('option[value]:not([value=""])').forEach(function (opt) {
+        // A subtype with no category yet (empty data-category) stays
+        // pickable under any category — picking it links it to whichever
+        // category is chosen here (see species_form.php's save handler).
+        opt.hidden = !!categoryCode && !!opt.dataset.category && opt.dataset.category !== categoryCode;
+      });
+      // Changing category invalidates any already-picked chip tied to a
+      // different, specific category — drop those, or the primary subtype
+      // could point at a category that no longer matches the one chosen
+      // above, tripping species_form.php's "mismatch" server check on an
+      // entirely ordinary "changed my mind" edit instead of only on actual
+      // form tampering.
+      var before = selected.length;
+      selected = selected.filter(function (item) {
+        var cat = metaById[item.id] ? metaById[item.id].category : '';
+        return !categoryCode || !cat || cat === categoryCode;
+      });
+      if (selected.length !== before) {
+        render();
+      }
+    }
+
+    render();
+    return { filterByCategory: filterByCategory };
+  })();
+
+  function filterSubtypesByCategory(categoryCode) {
+    subtypePicker.filterByCategory(categoryCode);
   }
   filterSubtypesByCategory(document.getElementById('category_code').value);
   </script>
@@ -307,6 +425,7 @@ $currentClassificationId = $species['classification_id'] ?? '';
               <td><?= e($stock['sales_channel'] ?? '') ?></td>
               <td>
                 <form class="inline" method="post" action="stock_delete.php" data-confirm="ลบรายการนี้?">
+                  <?= csrfField() ?>
                   <input type="hidden" name="id" value="<?= (int) $stock['id'] ?>">
                   <input type="hidden" name="species_id" value="<?= (int) $id ?>">
                   <button class="btn btn-sm btn-danger" type="submit">ลบ</button>
@@ -322,6 +441,7 @@ $currentClassificationId = $species['classification_id'] ?? '';
     <?php endif; ?>
 
     <form method="post" action="stock_add.php" class="inline-add-form">
+      <?= csrfField() ?>
       <input type="hidden" name="species_id" value="<?= (int) $id ?>">
       <div class="field-row">
         <label>ขนาด<input type="text" name="size_label" placeholder="เช่น เล็ก/กลาง/ใหญ่"></label>

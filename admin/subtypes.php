@@ -32,11 +32,13 @@ $subtypes = $pdo->query(
   <div class="btn-row">
     <button class="btn" type="button" onclick="document.getElementById('addSubtypeForm').hidden = false; document.getElementById('subtype_name_th').focus();">+ เพิ่มชนิด</button>
     <form id="bulkDeleteSubtypes" class="inline" method="post" action="subtype_bulk_delete.php" data-confirm="ลบชนิดที่เลือกทั้งหมดใช่หรือไม่? (รายการที่ยังมีชื่อต้นไม้ผูกอยู่จะถูกข้าม)">
+      <?= csrfField() ?>
       <button class="btn btn-sm btn-danger" type="submit" data-bulk-submit="subtypes" disabled>ลบที่เลือก</button>
     </form>
   </div>
 
   <form id="addSubtypeForm" method="post" action="subtype_form.php" class="inline-add-form" hidden>
+    <?= csrfField() ?>
     <label for="subtype_name_th">ชื่อชนิด (ไทย)</label>
     <div class="field-row">
       <input type="text" id="subtype_name_th" name="name_th" required placeholder="เช่น ไม้ผล, ไม้ดอก, ไม้ประดับ">
@@ -45,7 +47,7 @@ $subtypes = $pdo->query(
   </form>
 
   <?php if (isset($_GET['bulk_deleted'])): ?>
-    <div class="flash">
+    <div class="flash<?= (int) ($_GET['bulk_skipped'] ?? 0) > 0 ? ' warning' : '' ?>">
       ลบชนิดที่เลือกแล้ว <?= (int) $_GET['bulk_deleted'] ?> รายการ
       <?php if ((int) ($_GET['bulk_skipped'] ?? 0) > 0): ?>
         (ข้าม <?= (int) $_GET['bulk_skipped'] ?> รายการที่ยังมีชื่อต้นไม้ผูกอยู่ — ใช้ปุ่ม "ลบ" รายแถวเพื่อย้ายชื่อต้นไม้ก่อนลบ)
@@ -68,11 +70,13 @@ $subtypes = $pdo->query(
             <a class="btn-outline btn-sm" href="subtype_form.php?id=<?= (int) $st['id'] ?>">แก้ไข</a>
             <?php if ((int) $st['species_count'] === 0): ?>
             <form class="inline" method="post" action="subtype_delete.php" data-confirm="ลบชนิดนี้ใช่หรือไม่?">
+              <?= csrfField() ?>
               <input type="hidden" name="id" value="<?= (int) $st['id'] ?>">
               <button class="btn btn-sm btn-danger" type="submit">ลบ</button>
             </form>
             <?php else: ?>
             <form class="inline" method="post" action="subtype_delete.php" data-confirm="ย้ายชื่อต้นไม้ทั้งหมดไปชนิดที่เลือก แล้วลบชนิดนี้ใช่หรือไม่?">
+              <?= csrfField() ?>
               <input type="hidden" name="id" value="<?= (int) $st['id'] ?>">
               <select name="reassign_to" required title="ย้ายชื่อต้นไม้ไปชนิดนี้ก่อนลบ">
                 <option value="">— ย้ายชื่อต้นไม้ไปที่ —</option>

@@ -20,6 +20,7 @@ $roles = $pdo->query('SELECT id, role_key, name_th FROM roles ORDER BY id ASC')-
 $errors = [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    requireCsrf();
     $username = trim($_POST['username'] ?? '');
     $password = $_POST['password'] ?? '';
     $roleId = (int) ($_POST['role_id'] ?? 0);
@@ -101,6 +102,7 @@ $v = fn($key, $default = '') => e((string) ($admin[$key] ?? $default));
   <?php endforeach; ?>
 
   <form method="post">
+    <?= csrfField() ?>
     <label for="username">ชื่อผู้ใช้</label>
     <input type="text" id="username" name="username" value="<?= $v('username') ?>" required>
 

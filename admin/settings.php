@@ -7,6 +7,7 @@ $saved = false;
 $errors = [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    requireCsrf();
     $previousImage = getSetting($pdo, 'default_map_image', '');
     $previousLogo = getSetting($pdo, 'site_logo', '');
     $newImage = null;
@@ -19,13 +20,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = $e->getMessage();
     }
 
+    $mapUrlInput = trim($_POST['default_map_url'] ?? '');
+    $mapUrl = validatePublicUrl($mapUrlInput);
+    if ($mapUrlInput !== '' && $mapUrl === null) {
+        $errors[] = 'URL แผนที่ไม่ถูกต้อง (ต้องขึ้นต้นด้วย http:// หรือ https://)';
+    }
+
     if (!$errors) {
         // An uploaded file wins; otherwise keep whatever the text field has
         // (typed URL/path, or the existing value if left untouched).
         $imageValue = $newImage ?? trim($_POST['default_map_image'] ?? '');
 
         setSetting($pdo, 'default_map_image', $imageValue);
-        setSetting($pdo, 'default_map_url', trim($_POST['default_map_url'] ?? ''));
+        setSetting($pdo, 'default_map_url', $mapUrl ?? '');
         if ($newLogo !== null) {
             setSetting($pdo, 'site_logo', $newLogo);
         }
@@ -42,7 +49,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $defaultMapImage = getSetting($pdo, 'default_map_image', '');
-$defaultMapUrl = getSetting($pdo, 'default_map_url', '');
+$defaultMapUrl = $errors ? ($mapUrlInput ?? '') : getSetting($pdo, 'default_map_url', '');
 $siteLogo = getSetting($pdo, 'site_logo', '');
 ?>
 <!doctype html>
@@ -64,6 +71,7 @@ $siteLogo = getSetting($pdo, 'site_logo', '');
   <?php endforeach; ?>
 
   <form method="post" enctype="multipart/form-data">
+    <?= csrfField() ?>
     <label for="site_logo_file">โลโก้เว็บไซต์ / งาน</label>
     <?php if ($siteLogo): ?>
       <p><img src="../public/<?= e(ltrim($siteLogo, '/')) ?>" alt="" class="preview-thumb"></p>

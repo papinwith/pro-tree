@@ -43,6 +43,7 @@ $myId = (int) ($_SESSION['admin_id'] ?? 0);
               <a class="btn-outline btn-sm" href="user_form.php?id=<?= (int) $a['id'] ?>">แก้ไข</a>
               <?php if ((int) $a['id'] !== $myId): ?>
               <form class="inline" method="post" action="user_delete.php" data-confirm="ลบผู้ใช้งานนี้ใช่หรือไม่?">
+                <?= csrfField() ?>
                 <input type="hidden" name="id" value="<?= (int) $a['id'] ?>">
                 <button class="btn btn-sm btn-danger" type="submit">ลบ</button>
               </form>

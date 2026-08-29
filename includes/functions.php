@@ -7,6 +7,30 @@ function e(string $value): string
     return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
 }
 
+/**
+ * Admin-entered map links (tree_form.php, settings.php) get rendered back
+ * out as an <a href>, so a scheme other than http/https — javascript:,
+ * data:, etc. — would execute in whoever's browser clicks it. Only an admin
+ * can set this today, but validating it is cheap and closes the gap if that
+ * ever changes. Returns null for anything empty or invalid, so callers can
+ * just do `$url = validatePublicUrl($input)` and store/ignore accordingly.
+ */
+function validatePublicUrl(?string $url): ?string
+{
+    $url = trim((string) $url);
+    if ($url === '') {
+        return null;
+    }
+    if (!filter_var($url, FILTER_VALIDATE_URL)) {
+        return null;
+    }
+    $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+    if (!in_array($scheme, ['http', 'https'], true)) {
+        return null;
+    }
+    return $url;
+}
+
 function clientIp(): string
 {
     return $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
@@ -350,6 +374,35 @@ function getSpeciesById(PDO $pdo, int $id): ?array
     $stmt = $pdo->prepare('SELECT * FROM species WHERE id = :id');
     $stmt->execute(['id' => $id]);
     return $stmt->fetch() ?: null;
+}
+
+/**
+ * Subtype ids this species is additionally tagged with, beyond its
+ * required primary subtype_id — see species_subtypes in docs/install.sql.
+ */
+function getExtraSubtypeIdsForSpecies(PDO $pdo, int $speciesId): array
+{
+    $stmt = $pdo->prepare('SELECT subtype_id FROM species_subtypes WHERE species_id = :sid');
+    $stmt->execute(['sid' => $speciesId]);
+    return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+}
+
+/**
+ * Replaces this species' extra-subtype tags wholesale (delete then
+ * re-insert) — simpler than diffing, and this list is short enough (a
+ * handful of checkboxes) that it's never a real cost. The primary
+ * subtype_id is excluded even if it was checked, since it's already
+ * implied and storing it twice would just be redundant.
+ */
+function setExtraSubtypesForSpecies(PDO $pdo, int $speciesId, array $subtypeIds, int $primarySubtypeId): void
+{
+    $pdo->prepare('DELETE FROM species_subtypes WHERE species_id = :sid')->execute(['sid' => $speciesId]);
+    $insert = $pdo->prepare('INSERT INTO species_subtypes (species_id, subtype_id) VALUES (:sid, :tid)');
+    foreach (array_unique(array_map('intval', $subtypeIds)) as $subtypeId) {
+        if ($subtypeId > 0 && $subtypeId !== $primarySubtypeId) {
+            $insert->execute(['sid' => $speciesId, 'tid' => $subtypeId]);
+        }
+    }
 }
 
 /**

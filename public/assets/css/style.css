@@ -273,6 +273,7 @@ h1.tree-name { font-size: 1.65rem; font-weight: 800; margin: 18px 0 2px; letter-
   font-weight: 600;
 }
 .flash.error { background: var(--red-100); color: var(--red-600); }
+.flash.warning { background: var(--amber-100); color: var(--amber-600); }
 
 /* =================================================================
    Prev / Next navigation
@@ -567,6 +568,21 @@ h1.tree-name { font-size: 1.65rem; font-weight: 800; margin: 18px 0 2px; letter-
 .search-form { margin-bottom: 16px; }
 .search-form input { flex: 1; min-width: 220px; }
 .input-narrow { width: 140px !important; }
+
+/* Subtype picker chips (admin/species_form.php) — the ★-prefixed chip is
+   the primary subtype that plant_code/category assignment actually uses. */
+.chip-box { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; min-height: 32px; }
+.subtype-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--green-50); color: var(--green-700);
+  border: 1px solid var(--green-100); border-radius: 999px;
+  padding: 4px 6px 4px 12px; font-size: 0.85rem;
+}
+.subtype-chip-remove {
+  border: none; background: none; cursor: pointer; line-height: 1;
+  font-size: 1.05rem; color: var(--green-700); padding: 2px 6px; border-radius: 999px;
+}
+.subtype-chip-remove:hover { background: var(--green-100); }
 .mb-lg { margin-bottom: 24px; }
 .admin-wrap code { background: var(--gray-100); padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }
 

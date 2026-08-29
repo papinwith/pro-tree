@@ -30,10 +30,12 @@ $observations = $id ? getObservationsForTree($pdo, $id) : [];
 $maintenanceLogs = $id ? getMaintenanceLogsForTree($pdo, $id) : [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    requireCsrf();
     $speciesId = (int) ($_POST['species_id'] ?? 0);
     $zoneId = (int) ($_POST['zone_id'] ?? 0);
     $status = $_POST['status'] ?? 'healthy';
-    $mapUrl = trim($_POST['map_url'] ?? '') ?: null;
+    $mapUrlInput = trim($_POST['map_url'] ?? '');
+    $mapUrl = validatePublicUrl($mapUrlInput);
     $isActive = isset($_POST['is_active']) ? 1 : 0;
     // Garden area/nameplate/URL slug/coordinates/display order are no
     // longer admin-entered — the system assigns them (area_code defaults
@@ -59,6 +61,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     if (!isset($statuses[$status])) {
         $errors[] = 'สถานะไม่ถูกต้อง';
+    }
+    if ($mapUrlInput !== '' && $mapUrl === null) {
+        $errors[] = 'URL แผนที่ไม่ถูกต้อง (ต้องขึ้นต้นด้วย http:// หรือ https://)';
     }
 
     // Uploaded files replace the existing image only if a new one was chosen;
@@ -175,7 +180,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // keep entered values on validation error
     $tree = array_merge($tree ?? [], [
         'species_id' => $speciesId, 'zone_id' => $zoneId, 'area_code' => $areaCode, 'label' => $label, 'status' => $status,
-        'slug' => $slug, 'map_url' => $mapUrl, 'is_active' => $isActive,
+        'slug' => $slug, 'map_url' => $mapUrlInput, 'is_active' => $isActive,
         'latitude' => $latitude, 'longitude' => $longitude, 'quantity' => $quantity,
     ]);
 }
@@ -218,6 +223,7 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
   <?php else: ?>
 
   <form method="post" enctype="multipart/form-data">
+    <?= csrfField() ?>
     <label for="category_code">ประเภทพืช</label>
     <select id="category_code" onchange="filterSubtypesByCategory(this.value); filterSpecies();">
       <option value="">— ทั้งหมด —</option>
@@ -386,6 +392,7 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
               <td><?= e($ob['notes'] ?? '') ?></td>
               <td>
                 <form class="inline" method="post" action="observation_delete.php" data-confirm="ลบรายการนี้?">
+                  <?= csrfField() ?>
                   <input type="hidden" name="id" value="<?= (int) $ob['id'] ?>">
                   <input type="hidden" name="tree_id" value="<?= (int) $id ?>">
                   <button class="btn btn-sm btn-danger" type="submit">ลบ</button>
@@ -401,6 +408,7 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
     <?php endif; ?>
 
     <form method="post" action="observation_add.php" class="inline-add-form">
+      <?= csrfField() ?>
       <input type="hidden" name="tree_id" value="<?= (int) $id ?>">
       <div class="field-row">
         <label>วันที่<input type="date" name="observed_at" value="<?= e(date('Y-m-d')) ?>" required></label>
@@ -435,6 +443,7 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
               <td><?= e($log['notes'] ?? '') ?></td>
               <td>
                 <form class="inline" method="post" action="maintenance_delete.php" data-confirm="ลบรายการนี้?">
+                  <?= csrfField() ?>
                   <input type="hidden" name="id" value="<?= (int) $log['id'] ?>">
                   <input type="hidden" name="tree_id" value="<?= (int) $id ?>">
                   <button class="btn btn-sm btn-danger" type="submit">ลบ</button>
@@ -450,6 +459,7 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
     <?php endif; ?>
 
     <form method="post" action="maintenance_add.php" class="inline-add-form">
+      <?= csrfField() ?>
       <input type="hidden" name="tree_id" value="<?= (int) $id ?>">
       <div class="field-row">
         <label>วันที่<input type="date" name="performed_at" value="<?= e(date('Y-m-d')) ?>" required></label>
