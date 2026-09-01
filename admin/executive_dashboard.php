@@ -142,12 +142,13 @@ $categoryPalette = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008
 $categoryPieTotal = array_sum(array_column($byCategory, 'scan_count'));
 $categoryPieSlices = [];
 $categoryOtherCount = 0;
-foreach ($byCategory as $i => $c) {
+foreach ($byCategory as $c) {
     if ((int) $c['scan_count'] === 0) {
         continue;
     }
-    if ($i < count($categoryPalette)) {
-        $categoryPieSlices[] = ['label' => $c['category_name'], 'count' => (int) $c['scan_count'], 'color' => $categoryPalette[$i]];
+    $slotIndex = count($categoryPieSlices);
+    if ($slotIndex < count($categoryPalette)) {
+        $categoryPieSlices[] = ['label' => $c['category_name'], 'count' => (int) $c['scan_count'], 'color' => $categoryPalette[$slotIndex]];
     } else {
         $categoryOtherCount += (int) $c['scan_count'];
     }

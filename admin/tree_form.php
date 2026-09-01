@@ -54,10 +54,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $lngInput = trim($_POST['longitude'] ?? '');
     $latitude = $latInput !== '' ? (float) $latInput : (isset($tree['latitude']) ? (float) $tree['latitude'] : null);
     $longitude = $lngInput !== '' ? (float) $lngInput : (isset($tree['longitude']) ? (float) $tree['longitude'] : null);
-    if ($latInput !== '' && ($latitude < -90 || $latitude > 90)) {
+    if ($latInput !== '' && (!is_numeric($latInput) || $latitude < -90 || $latitude > 90)) {
         $errors[] = 'ละติจูดต้องอยู่ระหว่าง -90 ถึง 90';
     }
-    if ($lngInput !== '' && ($longitude < -180 || $longitude > 180)) {
+    if ($lngInput !== '' && (!is_numeric($lngInput) || $longitude < -180 || $longitude > 180)) {
         $errors[] = 'ลองจิจูดต้องอยู่ระหว่าง -180 ถึง 180';
     }
 

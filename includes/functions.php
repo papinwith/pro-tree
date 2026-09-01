@@ -232,28 +232,39 @@ function recordSale(
     $stockStmt = $pdo->prepare(
         'SELECT id, quantity FROM nursery_stock
          WHERE species_id = :sid AND size_id <=> :size AND quantity > 0
-         ORDER BY updated_at ASC LIMIT 1'
+         ORDER BY updated_at ASC'
     );
     $stockStmt->execute(['sid' => $speciesId, 'size' => $sizeId]);
-    $stockRow = $stockStmt->fetch();
+    $stockRows = $stockStmt->fetchAll();
     // A sized sale (e.g. "เล็ก") with no stock row of that exact size falls
-    // back to a sizeless bulk stock row (size_id NULL) if one exists —
+    // back to sizeless bulk stock rows (size_id NULL) if any exist —
     // otherwise stock never decrements at all just because the on-hand
     // count wasn't broken down by size yet.
-    if (!$stockRow && $sizeId !== null) {
+    if (!$stockRows && $sizeId !== null) {
         $bulkStockStmt = $pdo->prepare(
             'SELECT id, quantity FROM nursery_stock
              WHERE species_id = :sid AND size_id IS NULL AND quantity > 0
-             ORDER BY updated_at ASC LIMIT 1'
+             ORDER BY updated_at ASC'
         );
         $bulkStockStmt->execute(['sid' => $speciesId]);
-        $stockRow = $bulkStockStmt->fetch();
+        $stockRows = $bulkStockStmt->fetchAll();
     }
-    if ($stockRow) {
-        $remaining = max(0, (int) $stockRow['quantity'] - $quantity);
-        $pdo->prepare(
-            "UPDATE nursery_stock SET quantity = :qty, sale_status = IF(:qty2 <= 0, 'sold_out', sale_status) WHERE id = :id"
-        )->execute(['qty' => $remaining, 'qty2' => $remaining, 'id' => $stockRow['id']]);
+    // Stock isn't guaranteed to live in a single row per species+size (staff
+    // can add stock more than once), so a sale bigger than the oldest row's
+    // on-hand count spills into the next-oldest row rather than leaving the
+    // rest of the on-hand count untouched.
+    $remainingToDecrement = $quantity;
+    $updateStmt = $pdo->prepare(
+        "UPDATE nursery_stock SET quantity = :qty, sale_status = IF(:qty2 <= 0, 'sold_out', sale_status) WHERE id = :id"
+    );
+    foreach ($stockRows as $stockRow) {
+        if ($remainingToDecrement <= 0) {
+            break;
+        }
+        $take = min((int) $stockRow['quantity'], $remainingToDecrement);
+        $remaining = (int) $stockRow['quantity'] - $take;
+        $updateStmt->execute(['qty' => $remaining, 'qty2' => $remaining, 'id' => $stockRow['id']]);
+        $remainingToDecrement -= $take;
     }
 
     return $saleId;

@@ -34,4 +34,9 @@ UPDATE nursery_stock ns
   JOIN stock_sizes ss ON ss.name_th = ns.size_label
   SET ns.size_id = ss.id;
 
-ALTER TABLE nursery_stock DROP COLUMN size_label;
+-- Rename rather than drop: any size_label that didn't match a seeded name
+-- (size_id still NULL) holds free-typed text with no other record of it —
+-- dropping the column here would destroy that text permanently instead of
+-- leaving it for manual reassignment. Safe to drop legacy_size_label in a
+-- later migration once every row has a size_id.
+ALTER TABLE nursery_stock CHANGE COLUMN size_label legacy_size_label VARCHAR(50) NULL;
