@@ -2,18 +2,19 @@
    Design tokens
    ================================================================= */
 :root {
+  color-scheme: light;
   --green-50:  #e6fbea;
   --green-100: #c3f5cd;
-  --green-400: #2fe273;
-  --green-500: #0fbf51;
-  --green-600: #0a9c43;
-  --green-700: #077a35;
+  --green-400: #00e676;
+  --green-500: #00c853;
+  --green-600: #00a844;
+  --green-700: #00822e;
 
   --amber-100: #fff2cf;
-  --amber-600: #a66a00;
+  --amber-600: #c17700;
   --red-100:   #ffe3e6;
-  --red-600:   #e01e42;
-  --red-700:   #c11536;
+  --red-600:   #f01446;
+  --red-700:   #d10d34;
   --blue-100:  #dcf0ff;
   --blue-600:  #0d84e8;
   --gray-100:  #f0f5f0;
@@ -97,14 +98,47 @@ img { max-width: 100%; }
 .lang-switch a:hover { border-color: var(--green-400); color: var(--green-600); }
 .lang-switch a.active { background: var(--green-500); border-color: var(--green-500); color: #fff; }
 
-.map-banner { display: block; width: 100%; position: relative; }
-.map-banner img { width: 100%; display: block; height: 180px; object-fit: cover; }
-.map-banner::after {
-  content: "";
-  position: absolute; inset: 0;
-  background: linear-gradient(to top, rgba(0,0,0,0.18), transparent 40%);
-  pointer-events: none;
+.map-banner-wrap { position: relative; }
+
+.map-banner {
+  display: block;
+  width: 100%;
+  height: 180px;
+  object-fit: cover;
+  cursor: pointer;
+  border: 3px solid var(--border);
+  box-shadow: var(--shadow-sm);
 }
+
+.map-pin {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 2px solid #fff;
+  border-radius: 50% 50% 50% 0;
+  rotate: -45deg;
+  background: var(--green-600);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+}
+.map-pin.current { width: 26px; height: 26px; background: var(--green-500); box-shadow: 0 0 0 4px rgba(0, 200, 83, 0.25); }
+.map-pin-label {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+  background: var(--text);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  display: none;
+}
+.map-pin.open .map-pin-label { display: block; }
 
 .content { padding: 16px 20px 40px; }
 
@@ -120,7 +154,37 @@ img { max-width: 100%; }
   object-fit: cover;
   background: var(--gray-100);
   box-shadow: var(--shadow-sm);
+  cursor: pointer;
 }
+
+.lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 14, 10, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 1000;
+  cursor: zoom-out;
+}
+.lightbox-overlay[hidden] { display: none; }
+.lightbox-img { max-width: 100%; max-height: 100%; border-radius: var(--radius-md); cursor: default; }
+.lightbox-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.lightbox-close:hover { background: rgba(255, 255, 255, 0.28); }
 
 h1.tree-name { font-size: 1.65rem; font-weight: 800; margin: 18px 0 2px; letter-spacing: -0.01em; }
 
@@ -167,17 +231,19 @@ h1.tree-name { font-size: 1.65rem; font-weight: 800; margin: 18px 0 2px; letter-
 }
 .detail-section p { margin: 0; color: var(--muted); line-height: 1.6; font-size: 0.94rem; }
 
-.stats-box {
-  margin: 18px 0;
+.measurement-box { margin: 6px 0 14px; font-size: 0.9rem; color: var(--muted); }
+
+.price-box, .contact-box {
+  margin: 14px 0;
   padding: 13px 16px;
-  background: var(--green-50);
+  background: var(--card);
+  border: 1.5px solid var(--border);
   border-radius: var(--radius-md);
   font-size: 0.92rem;
-  color: var(--green-700);
-  display: flex;
-  align-items: center;
-  gap: 6px;
 }
+.price-list { list-style: none; margin: 6px 0 0; padding: 0; }
+.price-list li { padding: 3px 0; }
+.contact-box p { margin: 4px 0 0; }
 
 /* =================================================================
    Buttons
@@ -274,30 +340,6 @@ h1.tree-name { font-size: 1.65rem; font-weight: 800; margin: 18px 0 2px; letter-
 }
 .flash.error { background: var(--red-100); color: var(--red-600); }
 .flash.warning { background: var(--amber-100); color: var(--amber-600); }
-
-/* =================================================================
-   Prev / Next navigation
-   ================================================================= */
-.nav-buttons {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 30px;
-  gap: 10px;
-}
-.nav-buttons a, .nav-buttons span {
-  flex: 1;
-  text-align: center;
-  padding: 13px;
-  border-radius: var(--radius-sm);
-  border: 1.5px solid var(--border);
-  text-decoration: none;
-  color: var(--text);
-  font-size: 0.9rem;
-  font-weight: 600;
-  transition: border-color 0.15s var(--ease), background 0.15s var(--ease);
-}
-.nav-buttons a:hover { border-color: var(--green-500); background: var(--green-50); }
-.nav-buttons .disabled { color: var(--faint); background: var(--gray-100); border-color: var(--gray-100); }
 
 /* =================================================================
    QR scanner page
@@ -569,6 +611,23 @@ h1.tree-name { font-size: 1.65rem; font-weight: 800; margin: 18px 0 2px; letter-
 .search-form input { flex: 1; min-width: 220px; }
 .input-narrow { width: 140px !important; }
 
+/* Filter panel (admin/dashboard.php) — one row, same as the button rows
+   above it (.btn-row); wraps only if the viewport genuinely can't fit it,
+   not by design at normal admin desktop widths. */
+.filter-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.filter-form input[type=text] { flex: 1; min-width: 200px; }
+.filter-form select { width: auto; }
+
+/* Admin list-page pagination (admin/dashboard.php etc.) */
+.pagination { align-items: center; margin-top: 12px; }
+.pagination .disabled { color: var(--faint); background: var(--gray-100); border-color: var(--gray-100); cursor: default; }
+
 /* Subtype picker chips (admin/species_form.php) — the ★-prefixed chip is
    the primary subtype that plant_code/category assignment actually uses. */
 .chip-box { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; min-height: 32px; }
@@ -596,6 +655,24 @@ h1.tree-name { font-size: 1.65rem; font-weight: 800; margin: 18px 0 2px; letter-
 .completeness-bar-fill { height: 100%; background: var(--green-500); border-radius: 999px; transition: width 0.3s var(--ease); }
 .completeness-bar-fill.low { background: var(--amber-600); }
 .completeness-cell { display: flex; align-items: center; gap: 8px; }
+
+/* Stock donut (admin/executive_dashboard.php) — segments are the fixed
+   status colors the .sale-badge spans already use elsewhere; the badge row
+   beside it is the full text-only restatement, so the ring's color is
+   never the only way to read a value. */
+.donut-row { display: flex; flex-wrap: wrap; align-items: center; gap: 20px; margin: 14px 0; }
+.donut-chart { width: 140px; height: 140px; flex-shrink: 0; }
+.donut-chart circle { transition: stroke-dasharray 0.3s var(--ease); }
+.donut-chart-lg { width: 220px; height: 220px; }
+
+.section-header-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
+
+/* Legend for a categorical pie/donut (e.g. by-category chart) — always
+   present for 2+ series per the legend rule; each item pairs a swatch with
+   the label in text-token ink (never the series color used as text). */
+.chart-legend { display: flex; flex-direction: column; gap: 6px; }
+.chart-legend-item { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text); }
+.chart-legend-swatch { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
 
 /* =================================================================
    Confirm message box (replaces the native window.confirm() popup)
@@ -678,38 +755,7 @@ h1.tree-name { font-size: 1.65rem; font-weight: 800; margin: 18px 0 2px; letter-
   h1.tree-name { font-size: 1.4rem; }
 }
 
-/* =================================================================
-   Dark mode — mirrors the light palette, not an automatic invert
-   ================================================================= */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --green-50:  #123322;
-    --green-100: #164628;
-    --green-400: #3ef07d;
-    --green-500: #27e26a;
-    --green-600: #52ea8c;
-    --green-700: #85f3ac;
-
-    --amber-100: #3d2d05;
-    --amber-600: #ffc830;
-    --red-100:   #3d1017;
-    --red-600:   #ff5c78;
-    --red-700:   #ff92a4;
-    --gray-100:  #1e2a20;
-
-    --bg:     #0c130e;
-    --card:   #141d16;
-    --text:   #eefcf1;
-    --muted:  #a9c4ac;
-    --faint:  #71886f;
-    --border: #24352a;
-
-    --shadow-sm: 0 1px 2px rgba(0,0,0,0.35);
-    --shadow-md: 0 4px 16px rgba(0,0,0,0.4);
-    --shadow-lg: 0 12px 32px rgba(0,0,0,0.5);
-  }
-  .page { box-shadow: none; }
-  .lang-switch { background: linear-gradient(var(--card) 70%, transparent); }
-  .scanner { background: #05060a; }
-  .btn { color: #0c130c; }
-}
+/* Dark mode intentionally removed (2026-09-01, on request) — the site now
+   always renders the bright/light palette above, regardless of the
+   visitor's OS/browser color-scheme setting, instead of switching to a
+   black background via prefers-color-scheme. */

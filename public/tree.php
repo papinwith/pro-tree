@@ -27,16 +27,28 @@ $scanId = logScan(
     $tree['latitude'] !== null ? (float) $tree['latitude'] : null,
     $tree['longitude'] !== null ? (float) $tree['longitude'] : null
 );
-$stats = getScanStats($pdo, $tree['id']);
 
-// --- Prev / Next ---
-$prevTree = getPrevTree($pdo, (int) $tree['display_order']);
-$nextTree = getNextTree($pdo, (int) $tree['display_order']);
+// --- Latest size measurement, if staff have ever recorded one ---
+$observations = getObservationsForTree($pdo, $tree['id']);
+$latestObservation = $observations[0] ?? null;
+
+// --- Nursery stock currently for sale, with price — visitors should be
+// able to see the price up front, not only after clicking "request price". ---
+$stockForSale = array_values(array_filter(
+    getStockForSpecies($pdo, (int) $tree['species_id']),
+    fn($s) => $s['sale_status'] === 'available'
+));
 
 // --- Map banner (per-tree override falls back to global default) ---
 $mapImage = $tree['map_image_path'] ?: getSetting($pdo, 'default_map_image', '');
-$mapUrl = $tree['map_url'] ?: getSetting($pdo, 'default_map_url', '#');
 $siteLogo = getSetting($pdo, 'site_logo', '');
+
+// --- Zone pins overlaid on the map banner — too many trees to pin
+// individually, so pins are placed per zone in admin/zone_map.php. ---
+$mapZonePins = array_values(array_filter(
+    getAllZones($pdo),
+    fn($z) => $z['map_pin_x'] !== null && $z['map_pin_y'] !== null
+));
 
 // --- Flash message from interest submission redirect ---
 $flash = null;
@@ -47,6 +59,19 @@ if (isset($_GET['interest']) && $_GET['interest'] === 'ok') {
 }
 
 $locale = currentLocale();
+
+// --- Contact info / hours, shown near the bottom if the admin filled any in ---
+// Phone/LINE are identifiers, not language content — left as-is. Address
+// and hours are free text, so they go through the same lazy AI-translate-
+// and-cache pattern as species/zone/category content.
+$contactPhone = getSetting($pdo, 'contact_phone', '');
+$contactLine = getSetting($pdo, 'contact_line', '');
+$contactAddress = getSetting($pdo, 'contact_address', '');
+$openingHours = getSetting($pdo, 'opening_hours', '');
+if ($locale !== 'th') {
+    $contactAddress = ensureSettingTranslated($pdo, 'contact_address', $contactAddress, $locale);
+    $openingHours = ensureSettingTranslated($pdo, 'opening_hours', $openingHours, $locale);
+}
 
 // Admin only ever enters Thai — EN/ZH are generated on first view in that
 // language and cached on the species/zone rows, so this only calls Gemini
@@ -106,9 +131,16 @@ $detailSections = [
   </div>
 
   <?php if ($mapImage): ?>
-  <a class="map-banner" href="<?= e($mapUrl) ?>" target="_blank" rel="noopener">
-    <img src="<?= e(str_starts_with($mapImage, 'http') ? $mapImage : $base . '/' . ltrim($mapImage, '/')) ?>" alt="Map — click to open full map">
-  </a>
+  <div class="map-banner-wrap">
+    <img class="map-banner" id="mapBannerImage" src="<?= e(str_starts_with($mapImage, 'http') ? $mapImage : $base . '/' . ltrim($mapImage, '/')) ?>" alt="<?= e(t('map_label')) ?>" tabindex="0" role="button" aria-label="<?= e(t('expand_image_label')) ?>">
+    <?php foreach ($mapZonePins as $z): ?>
+      <button type="button" class="map-pin<?= (int) $z['id'] === (int) $tree['zone_id'] ? ' current' : '' ?>"
+              style="left:<?= e((string) $z['map_pin_x']) ?>%; top:<?= e((string) $z['map_pin_y']) ?>%"
+              aria-label="<?= e(localizedTreeField($z, 'name')) ?>">
+        <span class="map-pin-label"><?= e(localizedTreeField($z, 'name')) ?></span>
+      </button>
+    <?php endforeach; ?>
+  </div>
   <?php endif; ?>
 
   <div class="content">
@@ -122,7 +154,7 @@ $detailSections = [
     <?php endif; ?>
 
     <?php if ($tree['image_path']): ?>
-      <img class="tree-image" src="<?= e($base . '/' . ltrim($tree['image_path'], '/')) ?>" alt="<?= e($treeName) ?>">
+      <img class="tree-image" id="treeImage" src="<?= e($base . '/' . ltrim($tree['image_path'], '/')) ?>" alt="<?= e($treeName) ?>" tabindex="0" role="button" aria-label="<?= e(t('expand_image_label')) ?>">
     <?php endif; ?>
 
     <h1 class="tree-name"><?= e($treeName) ?></h1>
@@ -142,15 +174,26 @@ $detailSections = [
         <?php if (!empty($tree['classification_id'])): ?>
           <span class="classification-code"><?= e(t('classification_label')) ?>: <?= e($tree['classification_id']) ?></span>
         <?php endif; ?>
-        <?php if (!empty($tree['plant_code'])): ?>
-          <span class="classification-code"><?= e(t('plant_code_label')) ?>: <?= e($tree['plant_code']) ?></span>
-        <?php endif; ?>
         <?php if (!empty($tree['zone_name'])): ?>
           <span class="classification-code"><?= e(t('zone_label')) ?>: <?= e(localizedTreeField(['name' => $tree['zone_name'], 'name_en' => $tree['zone_name_en'], 'name_zh' => $tree['zone_name_zh']], 'name')) ?></span>
         <?php endif; ?>
         <?php if ($saleStatus): ?>
           <span class="sale-badge sale-badge-<?= e($saleStatus) ?>"><?= e($saleStatusLabels[$saleStatus] ?? $saleStatus) ?></span>
         <?php endif; ?>
+      </div>
+    <?php endif; ?>
+
+    <?php if ($latestObservation && ($latestObservation['height_cm'] !== null || $latestObservation['canopy_cm'] !== null)): ?>
+      <div class="measurement-box">
+        <strong><?= e(t('measurement_label')) ?>:</strong>
+        <?php if ($latestObservation['height_cm'] !== null): ?>
+          <?= e(t('height_label')) ?> <?= e(number_format((float) $latestObservation['height_cm'], 0)) ?> ซม.
+        <?php endif; ?>
+        <?php if ($latestObservation['height_cm'] !== null && $latestObservation['canopy_cm'] !== null): ?> · <?php endif; ?>
+        <?php if ($latestObservation['canopy_cm'] !== null): ?>
+          <?= e(t('canopy_label')) ?> <?= e(number_format((float) $latestObservation['canopy_cm'], 0)) ?> ซม.
+        <?php endif; ?>
+        <span class="muted-note">(<?= e(t('measured_at_label')) ?> <?= e($latestObservation['observed_at']) ?>)</span>
       </div>
     <?php endif; ?>
 
@@ -168,10 +211,23 @@ $detailSections = [
       <?php endforeach; ?>
     </div>
 
-    <div class="stats-box">
-      👁 <strong><?= number_format($stats['unique']) ?></strong> <?= e(t('stats_visitors')) ?>
-      (<?= number_format($stats['total']) ?> <?= e(t('stats_total_scans')) ?>)
-    </div>
+    <?php if ($stockForSale): ?>
+      <div class="price-box">
+        <strong><?= e(t('price_label')) ?>:</strong>
+        <ul class="price-list">
+          <?php foreach ($stockForSale as $stock): ?>
+            <li>
+              <?php if (!empty($stock['size_name_th'])): ?><?= e(localizedTreeField($stock, 'size_name')) ?> — <?php endif; ?>
+              <?php if ($stock['price'] !== null): ?>
+                <?= number_format((float) $stock['price'], 0) ?> ฿
+              <?php else: ?>
+                <?= e(t('price_request_btn')) ?>
+              <?php endif; ?>
+            </li>
+          <?php endforeach; ?>
+        </ul>
+      </div>
+    <?php endif; ?>
 
     <div class="interest-section">
       <div class="btn-row">
@@ -188,22 +244,25 @@ $detailSections = [
       </form>
     </div>
 
-    <div class="nav-buttons">
-      <?php if ($prevTree): ?>
-        <a href="<?= e($base) ?>/tree.php?id=<?= (int) $prevTree['id'] ?>&lang=<?= e($locale) ?>"><?= e(t('prev_tree')) ?></a>
-      <?php else: ?>
-        <span class="disabled"><?= e(t('prev_tree')) ?></span>
-      <?php endif; ?>
-
-      <?php if ($nextTree): ?>
-        <a href="<?= e($base) ?>/tree.php?id=<?= (int) $nextTree['id'] ?>&lang=<?= e($locale) ?>"><?= e(t('next_tree')) ?></a>
-      <?php else: ?>
-        <span class="disabled"><?= e(t('next_tree')) ?></span>
-      <?php endif; ?>
-    </div>
+    <?php if ($contactPhone || $contactLine || $contactAddress || $openingHours): ?>
+      <div class="contact-box">
+        <strong><?= e(t('contact_label')) ?></strong>
+        <?php if ($contactPhone): ?><p><?= e($contactPhone) ?></p><?php endif; ?>
+        <?php if ($contactLine): ?><p>LINE: <?= e($contactLine) ?></p><?php endif; ?>
+        <?php if ($contactAddress): ?><p><?= e(t('address_label')) ?>: <?= nl2br(e($contactAddress)) ?></p><?php endif; ?>
+        <?php if ($openingHours): ?><p><?= e(t('opening_hours_label')) ?>: <?= e($openingHours) ?></p><?php endif; ?>
+      </div>
+    <?php endif; ?>
 
   </div>
 </div>
+
+<?php if ($tree['image_path'] || $mapImage): ?>
+<div class="lightbox-overlay" id="imageLightbox" hidden>
+  <button type="button" class="lightbox-close" id="imageLightboxClose" aria-label="Close">×</button>
+  <img class="lightbox-img" id="imageLightboxImg" src="" alt="<?= e($treeName) ?>">
+</div>
+<?php endif; ?>
 
 <script>
 (function () {
@@ -215,6 +274,46 @@ $detailSections = [
     activityInput.value = 'interest_click';
     form.classList.toggle('open');
   });
+
+  // Zone pins on the map banner — tap to show/hide the zone name label;
+  // must not also trigger the banner image's own tap-to-zoom lightbox.
+  document.querySelectorAll('.map-pin').forEach(function (pin) {
+    pin.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var wasOpen = pin.classList.contains('open');
+      document.querySelectorAll('.map-pin.open').forEach(function (p) { p.classList.remove('open'); });
+      if (!wasOpen) pin.classList.add('open');
+    });
+  });
+
+  // Tap the tree photo, or the map banner, to view it full-size in the same popup.
+  var lightboxTriggers = [document.getElementById('treeImage'), document.getElementById('mapBannerImage')].filter(Boolean);
+  var lightbox = document.getElementById('imageLightbox');
+  if (lightboxTriggers.length && lightbox) {
+    var lightboxImg = document.getElementById('imageLightboxImg');
+    var closeLightbox = function () {
+      lightbox.hidden = true;
+      lightboxImg.src = '';
+    };
+    var openLightbox = function (img) {
+      lightboxImg.src = img.src;
+      lightbox.hidden = false;
+    };
+    lightboxTriggers.forEach(function (img) {
+      img.addEventListener('click', function () { openLightbox(img); });
+      img.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openLightbox(img); }
+      });
+    });
+    lightbox.addEventListener('click', closeLightbox);
+    document.getElementById('imageLightboxClose').addEventListener('click', function (e) {
+      e.stopPropagation();
+      closeLightbox();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && !lightbox.hidden) closeLightbox();
+    });
+  }
 
   if (priceBtn) {
     priceBtn.addEventListener('click', function () {

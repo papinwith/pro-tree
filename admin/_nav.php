@@ -8,6 +8,7 @@
 // they're not part of this menu.
 $masterDataLinks = [];
 if (can('zone.manage')) $masterDataLinks[] = ['zones.php', 'โซน'];
+if (can('zone.manage')) $masterDataLinks[] = ['zone_map.php', 'ปักหมุดโซนบนแผนที่'];
 if (can('category.manage')) $masterDataLinks[] = ['categories.php', 'ประเภทพืช'];
 if (can('category.manage')) $masterDataLinks[] = ['subtypes.php', 'ชนิด'];
 if (can('species.manage')) $masterDataLinks[] = ['species.php', 'ชื่อต้นไม้'];

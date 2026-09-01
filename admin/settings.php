@@ -26,6 +26,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors[] = 'URL แผนที่ไม่ถูกต้อง (ต้องขึ้นต้นด้วย http:// หรือ https://)';
     }
 
+    // Shown to visitors on the public tree page — free text, so staff can
+    // include a phone number, LINE ID, and hours however reads naturally
+    // rather than forcing separate fields per contact channel.
+    $contactPhone = trim($_POST['contact_phone'] ?? '');
+    $contactLine = trim($_POST['contact_line'] ?? '');
+    $contactAddress = trim($_POST['contact_address'] ?? '');
+    $openingHours = trim($_POST['opening_hours'] ?? '');
+
     if (!$errors) {
         // An uploaded file wins; otherwise keep whatever the text field has
         // (typed URL/path, or the existing value if left untouched).
@@ -33,6 +41,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         setSetting($pdo, 'default_map_image', $imageValue);
         setSetting($pdo, 'default_map_url', $mapUrl ?? '');
+        setSetting($pdo, 'contact_phone', $contactPhone);
+        setSetting($pdo, 'contact_line', $contactLine);
+        setSetting($pdo, 'contact_address', $contactAddress);
+        setSetting($pdo, 'opening_hours', $openingHours);
         if ($newLogo !== null) {
             setSetting($pdo, 'site_logo', $newLogo);
         }
@@ -51,6 +63,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $defaultMapImage = getSetting($pdo, 'default_map_image', '');
 $defaultMapUrl = $errors ? ($mapUrlInput ?? '') : getSetting($pdo, 'default_map_url', '');
 $siteLogo = getSetting($pdo, 'site_logo', '');
+$contactPhone = $errors ? ($contactPhone ?? '') : getSetting($pdo, 'contact_phone', '');
+$contactLine = $errors ? ($contactLine ?? '') : getSetting($pdo, 'contact_line', '');
+$contactAddress = $errors ? ($contactAddress ?? '') : getSetting($pdo, 'contact_address', '');
+$openingHours = $errors ? ($openingHours ?? '') : getSetting($pdo, 'opening_hours', '');
 ?>
 <!doctype html>
 <html lang="th">
@@ -90,10 +106,22 @@ $siteLogo = getSetting($pdo, 'site_logo', '');
     <label for="default_map_url">URL ปลายทางเมื่อคลิกแผนที่</label>
     <input type="url" id="default_map_url" name="default_map_url" value="<?= e($defaultMapUrl) ?>">
 
+    <label for="contact_phone">เบอร์โทรติดต่อ</label>
+    <input type="text" id="contact_phone" name="contact_phone" value="<?= e($contactPhone) ?>" placeholder="เช่น 081-234-5678">
+
+    <label for="contact_line">LINE ID</label>
+    <input type="text" id="contact_line" name="contact_line" value="<?= e($contactLine) ?>" placeholder="เช่น @treeshop">
+
+    <label for="contact_address">ที่อยู่ร้าน/สวน</label>
+    <textarea id="contact_address" name="contact_address" rows="2"><?= e($contactAddress) ?></textarea>
+
+    <label for="opening_hours">เวลาทำการ</label>
+    <input type="text" id="opening_hours" name="opening_hours" value="<?= e($openingHours) ?>" placeholder="เช่น ทุกวัน 08:00-17:00">
+
     <p><button class="btn" type="submit">บันทึก</button></p>
   </form>
 
-  <p class="field-hint">ต้นไม้แต่ละต้นสามารถกำหนดค่าเฉพาะของตัวเองแทนค่านี้ได้ในแบบฟอร์มแก้ไขต้นไม้</p>
+  <p class="field-hint">ต้นไม้แต่ละต้นสามารถกำหนดค่าเฉพาะของตัวเองแทนค่านี้ได้ในแบบฟอร์มแก้ไขต้นไม้ — ข้อมูลติดต่อ/เวลาทำการด้านบนจะแสดงในหน้าต้นไม้ที่ลูกค้าเห็นตอนสแกน QR</p>
 
   <section id="ai-translation" class="history-section">
     <h2>คำแปลด้วย AI (Gemini)</h2>

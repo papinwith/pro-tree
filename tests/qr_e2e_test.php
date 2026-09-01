@@ -197,31 +197,6 @@ try {
     check('scan stats: unique visitors now 2', $stats2['unique'] === 2, "got {$stats2['unique']}");
     trackVisitorCookie($r3, $createdVisitorUuids);
 
-    // --- 6. Prev/Next navigation follows display_order ---
-    check('tree B page links to prev tree A', str_contains($r1['body'], "tree.php?id=$treeA"));
-    check('tree B page links to next tree C', str_contains($r1['body'], "tree.php?id=$treeC"));
-
-    // Compare the rendered nav against what the DB layer (getPrevTree/getNextTree)
-    // itself says should be there, rather than assuming the test trees sit at the
-    // very edges of the whole table (real/seed trees may have lower display_order).
-    $rA = httpGet("$base/tree.php?id=$treeA&lang=en");
-    trackVisitorCookie($rA, $createdVisitorUuids);
-    $expectedPrevOfA = getPrevTree($pdo, $orderBase);
-    if ($expectedPrevOfA === null) {
-        check('tree A has Previous disabled (no tree with lower display_order)', str_contains($rA['body'], 'disabled">← Previous Tree'));
-    } else {
-        check('tree A Previous link matches getPrevTree()', str_contains($rA['body'], "tree.php?id={$expectedPrevOfA['id']}"));
-    }
-
-    $rC = httpGet("$base/tree.php?id=$treeC&lang=en");
-    trackVisitorCookie($rC, $createdVisitorUuids);
-    $expectedNextOfC = getNextTree($pdo, $orderBase + 2);
-    if ($expectedNextOfC === null) {
-        check('tree C has Next disabled (no tree with higher display_order)', str_contains($rC['body'], 'disabled">Next Tree'));
-    } else {
-        check('tree C Next link matches getNextTree()', str_contains($rC['body'], "tree.php?id={$expectedNextOfC['id']}"));
-    }
-
     // --- 7. Scanning a QR for a non-existent / inactive tree 404s ---
     $rMissing = httpGet("$base/tree.php?id=999999999");
     check('unknown tree id returns HTTP 404', $rMissing['status'] === 404, "got {$rMissing['status']}");
