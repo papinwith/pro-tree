@@ -4,10 +4,36 @@ requirePermission('qrcode.manage');
 
 $pdo = db();
 $trees = $pdo->query(
-    'SELECT t.*, s.name AS species_name
-     FROM trees t JOIN species s ON s.id = t.species_id
+    'SELECT t.*, s.name AS species_name, s.category_code, z.name AS zone_name
+     FROM trees t
+     JOIN species s ON s.id = t.species_id
+     JOIN zones z ON z.id = t.zone_id
      ORDER BY t.display_order ASC'
 )->fetchAll();
+
+$zones = getAllZones($pdo);
+$categories = getAllCategories($pdo);
+$statusLabels = ['healthy' => 'สมบูรณ์', 'needs_attention' => 'ต้องดูแล', 'removed' => 'นำออกแล้ว'];
+
+// Same filters as admin/dashboard.php — printing QR labels for the whole
+// garden every time is rarely what's wanted; usually it's "just the trees
+// I planted in zone X today" or similar.
+$zoneFilter = (int) ($_GET['zone_id'] ?? 0);
+if ($zoneFilter) {
+    $trees = array_values(array_filter($trees, fn($t) => (int) $t['zone_id'] === $zoneFilter));
+}
+$categoryFilter = trim($_GET['category_code'] ?? '');
+if ($categoryFilter !== '') {
+    $trees = array_values(array_filter($trees, fn($t) => $t['category_code'] === $categoryFilter));
+}
+$statusFilter = trim($_GET['status'] ?? '');
+if ($statusFilter !== '' && isset($statusLabels[$statusFilter])) {
+    $trees = array_values(array_filter($trees, fn($t) => $t['status'] === $statusFilter));
+}
+$activeFilter = trim($_GET['active'] ?? '');
+if ($activeFilter === '1' || $activeFilter === '0') {
+    $trees = array_values(array_filter($trees, fn($t) => (string) (int) $t['is_active'] === $activeFilter));
+}
 
 // Backfill QR codes for any tree that doesn't have one on disk yet.
 foreach ($trees as &$tree) {
@@ -35,7 +61,41 @@ unset($tree);
       <a class="btn-outline btn-sm" href="dashboard.php">&larr; กลับไปหน้าต้นไม้</a>
     </div>
   </div>
-  <p><button class="btn" type="button" onclick="window.print()">พิมพ์ทั้งหมด</button></p>
+  <form method="get" class="filter-form">
+    <select name="zone_id" aria-label="โซน">
+      <option value="">— ทุกโซน —</option>
+      <?php foreach ($zones as $z): ?>
+        <option value="<?= (int) $z['id'] ?>" <?= $zoneFilter === (int) $z['id'] ? 'selected' : '' ?>><?= e($z['name']) ?></option>
+      <?php endforeach; ?>
+    </select>
+
+    <select name="category_code" aria-label="ประเภทพืช">
+      <option value="">— ทุกประเภทพืช —</option>
+      <?php foreach ($categories as $cat): ?>
+        <option value="<?= e($cat['code']) ?>" <?= $categoryFilter === $cat['code'] ? 'selected' : '' ?>><?= e($cat['name_th']) ?></option>
+      <?php endforeach; ?>
+    </select>
+
+    <select name="status" aria-label="สถานะ">
+      <option value="">— ทุกสถานะ —</option>
+      <?php foreach ($statusLabels as $key => $label): ?>
+        <option value="<?= e($key) ?>" <?= $statusFilter === $key ? 'selected' : '' ?>><?= e($label) ?></option>
+      <?php endforeach; ?>
+    </select>
+
+    <select name="active" aria-label="เปิดใช้งาน">
+      <option value="">— เปิด/ปิดใช้งาน —</option>
+      <option value="1" <?= $activeFilter === '1' ? 'selected' : '' ?>>เปิดใช้งาน</option>
+      <option value="0" <?= $activeFilter === '0' ? 'selected' : '' ?>>ปิดใช้งาน</option>
+    </select>
+
+    <button class="btn-outline" type="submit">กรอง</button>
+    <?php if ($zoneFilter || $categoryFilter !== '' || $statusFilter !== '' || $activeFilter !== ''): ?>
+      <a class="btn-outline" href="qr_all.php">ล้างตัวกรอง</a>
+    <?php endif; ?>
+  </form>
+
+  <p><button class="btn" type="button" onclick="window.print()">พิมพ์ทั้งหมด (<?= count($trees) ?> ต้น)</button></p>
 </div>
 
 <div class="qr-grid">

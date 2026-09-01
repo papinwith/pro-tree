@@ -175,10 +175,87 @@ function getMaintenanceLogsForTree(PDO $pdo, int $treeId): array
     return $stmt->fetchAll();
 }
 
-/** All nursery stock rows for a species, most recently updated first. */
+/**
+ * All nursery stock rows for a species, most recently updated first —
+ * joined with stock_sizes so callers get size_name/_en/_zh directly
+ * instead of a separate lookup per row. `size_name` (no suffix, = Thai) is
+ * aliased alongside `size_name_th` (same value) so localizedTreeField()'s
+ * base-field-is-Thai convention works: it reads `$row['size_name']` for
+ * the default Thai locale and `$row['size_name_en']`/`_zh` for the others.
+ */
 function getStockForSpecies(PDO $pdo, int $speciesId): array
 {
-    $stmt = $pdo->prepare('SELECT * FROM nursery_stock WHERE species_id = :sid ORDER BY updated_at DESC');
+    $stmt = $pdo->prepare(
+        'SELECT ns.*, sz.name_th AS size_name, sz.name_th AS size_name_th, sz.name_en AS size_name_en, sz.name_zh AS size_name_zh
+         FROM nursery_stock ns
+         LEFT JOIN stock_sizes sz ON sz.id = ns.size_id
+         WHERE ns.species_id = :sid
+         ORDER BY ns.updated_at DESC'
+    );
+    $stmt->execute(['sid' => $speciesId]);
+    return $stmt->fetchAll();
+}
+
+/** All stock size options ("เล็ก/กลาง/ใหญ่"), in display order. */
+function getAllStockSizes(PDO $pdo): array
+{
+    return $pdo->query('SELECT * FROM stock_sizes ORDER BY display_order ASC, id ASC')->fetchAll();
+}
+
+/**
+ * Records an actual completed sale and, best-effort, decrements the
+ * matching nursery_stock row's quantity (flipping it to sold_out once it
+ * hits 0) — the two are kept only loosely in sync since a sale can still
+ * be recorded even when no matching stock row exists (e.g. it was already
+ * deleted), and that's fine: sale_transactions is the durable record,
+ * nursery_stock is just the current listing.
+ */
+function recordSale(
+    PDO $pdo,
+    int $speciesId,
+    ?int $sizeId,
+    int $quantity,
+    float $unitPrice,
+    ?string $soldBy,
+    ?string $notes
+): int {
+    $totalPrice = round($unitPrice * $quantity, 2);
+    $pdo->prepare(
+        'INSERT INTO sale_transactions (species_id, size_id, quantity, unit_price, total_price, sold_by, notes)
+         VALUES (:sid, :size, :qty, :unit, :total, :by, :notes)'
+    )->execute([
+        'sid' => $speciesId, 'size' => $sizeId, 'qty' => $quantity,
+        'unit' => $unitPrice, 'total' => $totalPrice, 'by' => $soldBy, 'notes' => $notes,
+    ]);
+    $saleId = (int) $pdo->lastInsertId();
+
+    $stockStmt = $pdo->prepare(
+        'SELECT id, quantity FROM nursery_stock
+         WHERE species_id = :sid AND size_id <=> :size AND quantity > 0
+         ORDER BY updated_at ASC LIMIT 1'
+    );
+    $stockStmt->execute(['sid' => $speciesId, 'size' => $sizeId]);
+    $stockRow = $stockStmt->fetch();
+    if ($stockRow) {
+        $remaining = max(0, (int) $stockRow['quantity'] - $quantity);
+        $pdo->prepare(
+            "UPDATE nursery_stock SET quantity = :qty, sale_status = IF(:qty2 <= 0, 'sold_out', sale_status) WHERE id = :id"
+        )->execute(['qty' => $remaining, 'qty2' => $remaining, 'id' => $stockRow['id']]);
+    }
+
+    return $saleId;
+}
+
+/** Sale history for a species, most recent first. */
+function getSalesForSpecies(PDO $pdo, int $speciesId): array
+{
+    $stmt = $pdo->prepare(
+        'SELECT st.*, sz.name_th AS size_name_th
+         FROM sale_transactions st
+         LEFT JOIN stock_sizes sz ON sz.id = st.size_id
+         WHERE st.species_id = :sid
+         ORDER BY st.sold_at DESC'
+    );
     $stmt->execute(['sid' => $speciesId]);
     return $stmt->fetchAll();
 }
@@ -434,30 +511,6 @@ function getTreeById(PDO $pdo, int $id): ?array
          WHERE t.id = :id AND t.is_active = 1'
     );
     $stmt->execute(['id' => $id]);
-    $row = $stmt->fetch();
-    return $row ?: null;
-}
-
-function getPrevTree(PDO $pdo, int $displayOrder): ?array
-{
-    $stmt = $pdo->prepare(
-        'SELECT id, display_order FROM trees
-         WHERE is_active = 1 AND display_order < :order
-         ORDER BY display_order DESC LIMIT 1'
-    );
-    $stmt->execute(['order' => $displayOrder]);
-    $row = $stmt->fetch();
-    return $row ?: null;
-}
-
-function getNextTree(PDO $pdo, int $displayOrder): ?array
-{
-    $stmt = $pdo->prepare(
-        'SELECT id, display_order FROM trees
-         WHERE is_active = 1 AND display_order > :order
-         ORDER BY display_order ASC LIMIT 1'
-    );
-    $stmt->execute(['order' => $displayOrder]);
     $row = $stmt->fetch();
     return $row ?: null;
 }

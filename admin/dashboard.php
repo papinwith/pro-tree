@@ -4,7 +4,7 @@ requirePermission('tree.view');
 
 $pdo = db();
 $trees = $pdo->query(
-    'SELECT t.*, s.name AS species_name, s.classification_id, z.name AS zone_name, z.zone_code
+    'SELECT t.*, s.name AS species_name, s.classification_id, s.category_code, z.name AS zone_name, z.zone_code
      FROM trees t
      JOIN species s ON s.id = t.species_id
      JOIN zones z ON z.id = t.zone_id
@@ -13,6 +13,9 @@ $trees = $pdo->query(
 $siteLogo = getSetting($pdo, 'site_logo', '');
 $statusLabels = ['healthy' => 'สมบูรณ์', 'needs_attention' => 'ต้องดูแล', 'removed' => 'นำออกแล้ว'];
 $reprintId = isset($_GET['reprint']) ? (int) $_GET['reprint'] : 0;
+
+$zones = getAllZones($pdo);
+$categories = getAllCategories($pdo);
 
 $q = trim($_GET['q'] ?? '');
 if ($q !== '') {
@@ -26,6 +29,51 @@ if ($q !== '') {
             || (string) $t['id'] === $needle;
     }));
 }
+
+// Filters mirror the columns actually shown in the table below, so an admin
+// can narrow down by whatever they're already looking at. Applied after the
+// free-text search (both narrow the same list further) and before pagination.
+$zoneFilter = (int) ($_GET['zone_id'] ?? 0);
+if ($zoneFilter) {
+    $trees = array_values(array_filter($trees, fn($t) => (int) $t['zone_id'] === $zoneFilter));
+}
+$categoryFilter = trim($_GET['category_code'] ?? '');
+if ($categoryFilter !== '') {
+    $trees = array_values(array_filter($trees, fn($t) => $t['category_code'] === $categoryFilter));
+}
+$statusFilter = trim($_GET['status'] ?? '');
+if ($statusFilter !== '' && isset($statusLabels[$statusFilter])) {
+    $trees = array_values(array_filter($trees, fn($t) => $t['status'] === $statusFilter));
+}
+$activeFilter = trim($_GET['active'] ?? '');
+if ($activeFilter === '1' || $activeFilter === '0') {
+    $trees = array_values(array_filter($trees, fn($t) => (string) (int) $t['is_active'] === $activeFilter));
+}
+
+// Paginate the (already search/filter-narrowed) list, 10 per page — this
+// table has no upper bound on row count, and rendering everything in one
+// page got unwieldy once there were more than a handful of trees.
+$perPage = 10;
+$totalTrees = count($trees);
+$totalPages = max(1, (int) ceil($totalTrees / $perPage));
+$page = max(1, min($totalPages, (int) ($_GET['page'] ?? 1)));
+$trees = array_slice($trees, ($page - 1) * $perPage, $perPage);
+$queryParams = [
+    'q' => $q ?: null,
+    'zone_id' => $zoneFilter ?: null,
+    'category_code' => $categoryFilter ?: null,
+    'status' => $statusFilter ?: null,
+    'active' => $activeFilter !== '' ? $activeFilter : null,
+];
+// array_filter()'s default callback drops falsy values, and PHP treats the
+// string "0" as falsy — the same as null/''/unset. That would silently
+// strip active=0 (the "inactive" filter) out of every pagination link,
+// since "0" is a meaningful, deliberately-set value here, not an absence
+// of one. Filter on strict null instead so only actually-unset params drop.
+$pageUrl = fn(int $p) => '?' . http_build_query(array_filter(
+    $queryParams + ['page' => $p > 1 ? $p : null],
+    fn($v) => $v !== null
+));
 ?>
 <!doctype html>
 <html lang="th">
@@ -66,9 +114,40 @@ if ($q !== '') {
     </form>
   </div>
 
-  <form method="get" class="btn-row search-form">
-    <input type="text" name="q" value="<?= e($q) ?>" placeholder="ค้นหาด้วยชนิดพันธุ์ โซน ป้ายชื่อ หรือ Tree ID...">
-    <button class="btn-outline btn-sm" type="submit">ค้นหา</button>
+  <form method="get" class="filter-form">
+    <input type="text" name="q" value="<?= e($q) ?>" placeholder="ค้นหาด้วยชนิดพันธุ์ โซน ป้ายชื่อ หรือ Tree ID" aria-label="ค้นหา">
+
+    <select name="zone_id" aria-label="โซน">
+      <option value="">— ทุกโซน —</option>
+      <?php foreach ($zones as $z): ?>
+        <option value="<?= (int) $z['id'] ?>" <?= $zoneFilter === (int) $z['id'] ? 'selected' : '' ?>><?= e($z['name']) ?></option>
+      <?php endforeach; ?>
+    </select>
+
+    <select name="category_code" aria-label="ประเภทพืช">
+      <option value="">— ทุกประเภทพืช —</option>
+      <?php foreach ($categories as $cat): ?>
+        <option value="<?= e($cat['code']) ?>" <?= $categoryFilter === $cat['code'] ? 'selected' : '' ?>><?= e($cat['name_th']) ?></option>
+      <?php endforeach; ?>
+    </select>
+
+    <select name="status" aria-label="สถานะ">
+      <option value="">— ทุกสถานะ —</option>
+      <?php foreach ($statusLabels as $key => $label): ?>
+        <option value="<?= e($key) ?>" <?= $statusFilter === $key ? 'selected' : '' ?>><?= e($label) ?></option>
+      <?php endforeach; ?>
+    </select>
+
+    <select name="active" aria-label="เปิดใช้งาน">
+      <option value="">— เปิด/ปิดใช้งาน —</option>
+      <option value="1" <?= $activeFilter === '1' ? 'selected' : '' ?>>เปิดใช้งาน</option>
+      <option value="0" <?= $activeFilter === '0' ? 'selected' : '' ?>>ปิดใช้งาน</option>
+    </select>
+
+    <button class="btn" type="submit">ค้นหา/กรอง</button>
+    <?php if ($q !== '' || $zoneFilter || $categoryFilter !== '' || $statusFilter !== '' || $activeFilter !== ''): ?>
+      <a class="btn-outline" href="dashboard.php">ล้างตัวกรอง</a>
+    <?php endif; ?>
   </form>
 
   <div class="table-scroll">
@@ -108,6 +187,22 @@ if ($q !== '') {
       </tbody>
     </table>
   </div>
+
+  <?php if ($totalPages > 1): ?>
+  <div class="btn-row pagination">
+    <?php if ($page > 1): ?>
+      <a class="btn-outline btn-sm" href="<?= e($pageUrl($page - 1)) ?>">&larr; ก่อนหน้า</a>
+    <?php else: ?>
+      <span class="btn-outline btn-sm disabled">&larr; ก่อนหน้า</span>
+    <?php endif; ?>
+    <span class="field-hint">หน้า <?= $page ?> / <?= $totalPages ?> (ทั้งหมด <?= $totalTrees ?> ต้น)</span>
+    <?php if ($page < $totalPages): ?>
+      <a class="btn-outline btn-sm" href="<?= e($pageUrl($page + 1)) ?>">ถัดไป &rarr;</a>
+    <?php else: ?>
+      <span class="btn-outline btn-sm disabled">ถัดไป &rarr;</span>
+    <?php endif; ?>
+  </div>
+  <?php endif; ?>
 </div>
 <?php require __DIR__ . '/_confirm_modal.php'; ?>
 <script src="../public/assets/js/bulk-select.js"></script>
