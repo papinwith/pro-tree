@@ -45,8 +45,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $areaCode = $tree['area_code'] ?? '01';
     $label = $tree['label'] ?? null;
     $slug = $tree['slug'] ?? null;
-    $latitude = isset($tree['latitude']) ? (float) $tree['latitude'] : null;
-    $longitude = isset($tree['longitude']) ? (float) $tree['longitude'] : null;
+    // GPS coordinates ARE admin-entered (unlike area/label/slug above) —
+    // optional, since not every tree has been surveyed yet. Kept as the
+    // existing value when the field is left blank on an edit, so re-saving
+    // the form without touching these never wipes a coordinate someone
+    // already recorded.
+    $latInput = trim($_POST['latitude'] ?? '');
+    $lngInput = trim($_POST['longitude'] ?? '');
+    $latitude = $latInput !== '' ? (float) $latInput : (isset($tree['latitude']) ? (float) $tree['latitude'] : null);
+    $longitude = $lngInput !== '' ? (float) $lngInput : (isset($tree['longitude']) ? (float) $tree['longitude'] : null);
+    if ($latInput !== '' && ($latitude < -90 || $latitude > 90)) {
+        $errors[] = 'ละติจูดต้องอยู่ระหว่าง -90 ถึง 90';
+    }
+    if ($lngInput !== '' && ($longitude < -180 || $longitude > 180)) {
+        $errors[] = 'ลองจิจูดต้องอยู่ระหว่าง -180 ถึง 180';
+    }
 
     // Only present (and only meaningful) when creating — lets staff plant
     // several identical trees of the same species/zone in one submit,
@@ -91,7 +104,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $mapImagePath = $newMapImagePath;
         }
 
-        $locationUpdatedAt = $tree['location_updated_at'] ?? null;
+        // Only bump the timestamp when a coordinate was actually typed this
+        // submit — re-saving the rest of the form (a new photo, a status
+        // change) shouldn't make an untouched location look freshly surveyed.
+        $locationUpdatedAt = ($latInput !== '' || $lngInput !== '')
+            ? date('Y-m-d H:i:s')
+            : ($tree['location_updated_at'] ?? null);
 
         $params = [
             'species_id' => $speciesId, 'zone_id' => $zoneId, 'area_code' => $areaCode, 'label' => $label, 'status' => $status,
@@ -236,7 +254,7 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
     <select id="subtype_filter" onchange="filterSpecies()">
       <option value="">— ทั้งหมด —</option>
       <?php foreach ($subtypes as $st): ?>
-        <option value="<?= (int) $st['id'] ?>" data-category="<?= e($st['category_code']) ?>"
+        <option value="<?= (int) $st['id'] ?>" data-category="<?= e($st['category_code'] ?? '') ?>"
           <?= (string) $initialSubtypeId === (string) $st['id'] ? 'selected' : '' ?>><?= e($st['name_th']) ?></option>
       <?php endforeach; ?>
     </select>
@@ -288,6 +306,18 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
         <option value="<?= e($key) ?>" <?= ($tree['status'] ?? 'healthy') === $key ? 'selected' : '' ?>><?= e($label) ?></option>
       <?php endforeach; ?>
     </select>
+
+    <label for="latitude">พิกัด GPS (ไม่บังคับ)</label>
+    <div class="field-row">
+      <input type="text" id="latitude" name="latitude" inputmode="decimal" placeholder="ละติจูด เช่น 13.7563" value="<?= $v('latitude') ?>">
+      <input type="text" id="longitude" name="longitude" inputmode="decimal" placeholder="ลองจิจูด เช่น 100.5018" value="<?= $v('longitude') ?>">
+    </div>
+    <p class="field-hint">
+      ปล่อยว่างไว้ถ้ายังไม่ได้สำรวจตำแหน่ง — เปิดแอปแผนที่บนมือถือแล้วคัดลอกพิกัดจากตำแหน่งปัจจุบันมาวางได้เลย
+      <?php if (!empty($tree['location_updated_at'])): ?>
+        (บันทึกพิกัดล่าสุดเมื่อ <?= e($tree['location_updated_at']) ?>)
+      <?php endif; ?>
+    </p>
 
     <label for="image">รูปภาพต้นไม้</label>
     <?php if (!empty($tree['image_path'])): ?>
