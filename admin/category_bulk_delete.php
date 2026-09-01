@@ -11,6 +11,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($codes) {
         $pdo = db();
         $countStmt = $pdo->prepare('SELECT COUNT(*) FROM species WHERE category_code = :code');
+        $unassignSubtypesStmt = $pdo->prepare('UPDATE subtypes SET category_code = NULL WHERE category_code = :code');
         $deleteStmt = $pdo->prepare('DELETE FROM categories WHERE code = :code');
         foreach ($codes as $code) {
             // Same guard as category_delete.php's no-reassign path: refuse
@@ -20,6 +21,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // reassign one at a time).
             $countStmt->execute(['code' => $code]);
             if ((int) $countStmt->fetchColumn() === 0) {
+                // A subtype can be linked to this category directly
+                // (subtypes.category_code) even with zero species using it —
+                // unassign those first or the FK there blocks the delete
+                // below (fk_subtypes_category), same fix as category_delete.php.
+                $unassignSubtypesStmt->execute(['code' => $code]);
                 $deleteStmt->execute(['code' => $code]);
                 $deleted++;
             } else {

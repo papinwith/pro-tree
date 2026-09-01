@@ -38,6 +38,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($canDelete) {
+            // A subtype can be linked to a category directly (subtypes.category_code)
+            // independently of whether any species in that category use it —
+            // the FK there would otherwise block this delete even after every
+            // species has been moved out. Unassigning is safe and matches how
+            // the rest of the app already treats "no category yet" as a normal
+            // subtype state (see subtype_form.php).
+            $pdo->prepare('UPDATE subtypes SET category_code = NULL WHERE category_code = :code')
+                ->execute(['code' => $code]);
             $pdo->prepare('DELETE FROM categories WHERE code = :code')->execute(['code' => $code]);
         }
     }
