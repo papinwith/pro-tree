@@ -11,10 +11,7 @@ define('VISITOR_COOKIE_NAME', 'tree_visitor_id');
 define('VISITOR_COOKIE_TTL', 60 * 60 * 24 * 365 * 2); // 2 years
 
 // Base URL of the app, used for building QR target links (no trailing slash).
-// The htdocs folder for this project is literally named "pro tree" (with a
-// space), so the space must be percent-encoded here or every QR/link built
-// from this constant 404s.
-define('APP_BASE_URL', getenv('APP_BASE_URL') ?: 'http://localhost/pro%20tree/public');
+define('APP_BASE_URL', getenv('APP_BASE_URL') ?: 'http://localhost/tree-siam-main/public');
 
 // Google Gemini AI translation — server-side only, never exposed to the
 // browser and never stored in the database. Feature auto-disables (falls
@@ -36,6 +33,16 @@ if (!defined('GEMINI_MODEL')) {
     define('GEMINI_MODEL', getenv('GEMINI_MODEL') ?: 'gemini-3.6-flash');
 }
 define('AI_ENABLED', GEMINI_API_KEY !== '');
+
+// Forces the Gemini API call onto IPv4 — a workaround for hosts/networks
+// where outbound IPv6 to generativelanguage.googleapis.com is misconfigured
+// or blackholed (curl hangs the full timeout trying IPv6 first otherwise).
+// Off by default: forcing IPv4 unconditionally would be actively worse on a
+// host where IPv6 works fine but IPv4 is the restricted/slower path. Set
+// GEMINI_FORCE_IPV4=1 in the environment only on hosts that need it.
+if (!defined('GEMINI_FORCE_IPV4')) {
+    define('GEMINI_FORCE_IPV4', getenv('GEMINI_FORCE_IPV4') === '1');
+}
 
 // Dev-only login bypass — skip typing a password while testing locally.
 // OFF by default. Set in config/local.php (gitignored), never here, never

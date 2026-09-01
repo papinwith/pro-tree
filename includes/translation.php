@@ -70,16 +70,38 @@ function geminiTranslateFields(array $thaiFieldsByKey, array $targetLangs): ?arr
     ]);
 
     $url = 'https://generativelanguage.googleapis.com/v1beta/models/' . rawurlencode(GEMINI_MODEL)
-        . ':generateContent?key=' . rawurlencode(GEMINI_API_KEY);
+        . ':generateContent';
 
     $ch = curl_init($url);
-    curl_setopt_array($ch, [
+    $curlOpts = [
         CURLOPT_POST => true,
         CURLOPT_POSTFIELDS => $body,
-        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+        // Newer Gemini API keys (the "AQ...." format issued by current AI
+        // Studio) are rejected with 401 ACCESS_TOKEN_TYPE_UNSUPPORTED when
+        // sent as the old `?key=` query param — Google's own current docs
+        // send it as this header instead. The header form also works fine
+        // with the older AIzaSy... key format, so this isn't a breaking
+        // change for anyone already using that.
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'X-goog-api-key: ' . GEMINI_API_KEY],
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 20,
-    ]);
+        // A species with all 8 translatable fields filled in (a few hundred
+        // words of Thai) has been observed taking ~20s for Gemini to
+        // translate in one call — right at the edge of a 20s timeout, so
+        // that ended up intermittently failing (and silently falling back
+        // to Thai) on exactly the richest, most-worth-translating rows.
+        CURLOPT_TIMEOUT => 45,
+    ];
+    // generativelanguage.googleapis.com resolves IPv6-first; on a host/
+    // network where outbound IPv6 is misconfigured or blackholed, curl
+    // silently hangs the full timeout trying that address before ever
+    // reaching Google, and every translation quietly no-ops via the
+    // catch-all failure fallback below. Forcing IPv4 sidesteps that, but
+    // only opt-in (GEMINI_FORCE_IPV4) — unconditionally forcing it would be
+    // actively worse on a host where IPv4 is the restricted/slower path.
+    if (GEMINI_FORCE_IPV4) {
+        $curlOpts[CURLOPT_IPRESOLVE] = CURL_IPRESOLVE_V4;
+    }
+    curl_setopt_array($ch, $curlOpts);
     $response = curl_exec($ch);
     $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $curlError = curl_error($ch);
@@ -267,4 +289,35 @@ function ensureCategoryTranslated(PDO $pdo, string $categoryCode, string $lang):
         ->execute(['val' => trim($text), 'code' => $categoryCode]);
     $category[$column] = trim($text);
     return $category;
+}
+
+/**
+ * Same lazy-translate-and-cache pattern as the row-based ensure*Translated()
+ * functions above, but for a single free-text `settings` value (e.g.
+ * contact_address, opening_hours — admin/settings.php) rather than a DB row
+ * with dedicated _en/_zh columns. The cache lives as its own settings row
+ * under "{$settingKey}_{$lang}" instead. Returns the Thai text unchanged if
+ * AI is disabled, the language isn't en/zh, or translation fails — same
+ * silent-fallback contract as the rest of this file.
+ */
+function ensureSettingTranslated(PDO $pdo, string $settingKey, string $thaiValue, string $lang): string
+{
+    if ($thaiValue === '' || !AI_ENABLED || !in_array($lang, ['en', 'zh'], true)) {
+        return $thaiValue;
+    }
+
+    $cacheKey = $settingKey . '_' . $lang;
+    $cached = trim(getSetting($pdo, $cacheKey, ''));
+    if ($cached !== '') {
+        return $cached;
+    }
+
+    $translated = geminiTranslateFields([$settingKey => $thaiValue], [$lang]);
+    $text = $translated[$lang][$settingKey] ?? null;
+    if (!is_string($text) || trim($text) === '') {
+        return $thaiValue;
+    }
+
+    setSetting($pdo, $cacheKey, trim($text));
+    return trim($text);
 }

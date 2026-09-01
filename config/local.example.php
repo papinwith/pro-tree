@@ -17,6 +17,16 @@ if (!defined('GEMINI_API_KEY')) {
 //     define('GEMINI_MODEL', 'gemini-2.0-flash');
 // }
 
+// Optional — only uncomment if translations are silently failing/falling
+// back to Thai on this machine because outbound IPv6 to
+// generativelanguage.googleapis.com is misconfigured or blackholed on your
+// network (curl hangs the full timeout trying IPv6 first otherwise). Leave
+// this off if translations already work — forcing IPv4 unconditionally can
+// be worse on a host where IPv6 is the working/faster path.
+// if (!defined('GEMINI_FORCE_IPV4')) {
+//     define('GEMINI_FORCE_IPV4', true);
+// }
+
 // Optional — dev-only login bypass, lets admin/login.php show "log in as
 // ___" buttons for every existing admin account instead of typing a
 // password, so you can quickly test different roles while developing.
