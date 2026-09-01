@@ -69,6 +69,12 @@ $contactLine = getSetting($pdo, 'contact_line', '');
 $contactAddress = getSetting($pdo, 'contact_address', '');
 $openingHours = getSetting($pdo, 'opening_hours', '');
 if ($locale !== 'th') {
+    // Up to 5 sequential Gemini calls can land below (contact address,
+    // opening hours, species, zone, category), each allowed up to 45s on a
+    // cache miss — comfortably past PHP's default 30s max_execution_time.
+    // Only raised on this non-Thai, cache-miss-possible path; the Thai path
+    // above never calls out to Gemini at all.
+    set_time_limit(240);
     $contactAddress = ensureSettingTranslated($pdo, 'contact_address', $contactAddress, $locale);
     $openingHours = ensureSettingTranslated($pdo, 'opening_hours', $openingHours, $locale);
 }

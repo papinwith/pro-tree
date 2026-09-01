@@ -13,6 +13,20 @@ define('VISITOR_COOKIE_TTL', 60 * 60 * 24 * 365 * 2); // 2 years
 // Base URL of the app, used for building QR target links (no trailing slash).
 define('APP_BASE_URL', getenv('APP_BASE_URL') ?: 'http://localhost/tree-siam-main/public');
 
+// Whether X-Forwarded-Proto/-For/-Host/-Real-IP can be trusted as coming
+// from a real reverse proxy in front of this app, rather than directly from
+// the client. Off by default: on a deployment with no proxy (this project's
+// default XAMPP setup included), those are ordinary client-supplied HTTP
+// headers anyone can send — trusting them unconditionally would let a
+// spoofed X-Forwarded-Proto: https mark the admin session cookie Secure
+// over a genuinely plain-HTTP connection, and the browser then silently
+// drops that cookie, logging the admin out right after login. Set
+// TRUST_PROXY=1 only on a deployment where a real reverse proxy sets (and
+// strips any client-supplied copy of) these headers before forwarding.
+if (!defined('TRUST_PROXY')) {
+    define('TRUST_PROXY', getenv('TRUST_PROXY') === '1');
+}
+
 // Google Gemini AI translation — server-side only, never exposed to the
 // browser and never stored in the database. Feature auto-disables (falls
 // back to manual entry) when no key is configured, so nothing breaks in

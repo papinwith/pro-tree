@@ -18,11 +18,14 @@ function startAdminSession(): void
         // terminates TLS, proxies to PHP-FPM over plain HTTP) — PHP would see
         // that as an ordinary HTTP request and drop Secure even though the
         // visitor is genuinely on https://; X-Forwarded-Proto is what the
-        // proxy sets to say so (same reasoning as APP_ENV's proxy detection
-        // in config/config.php).
+        // proxy sets to say so. Only trusted when TRUST_PROXY is on
+        // (config/config.php) — X-Forwarded-Proto is an ordinary
+        // client-settable header on any deployment with no real proxy in
+        // front, and trusting it there would let a spoofed "https" mark this
+        // cookie Secure over plain HTTP, silently logging the admin out.
         $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
             || ($_SERVER['SERVER_PORT'] ?? null) == 443
-            || strtolower($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https';
+            || (TRUST_PROXY && strtolower($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https');
         // Also raise server-side GC's own idea of session lifetime to match
         // — php.ini's session.gc_maxlifetime defaults to 1440s (24 min) on
         // most installs, which would let an idle admin's session file get

@@ -15,6 +15,18 @@ $zones = getAllZones($pdo);
 $categories = getAllCategories($pdo);
 $statusLabels = ['healthy' => 'สมบูรณ์', 'needs_attention' => 'ต้องดูแล', 'removed' => 'นำออกแล้ว'];
 
+// Backfill QR codes for any tree that doesn't have one on disk yet — over
+// the full unfiltered list, so a filtered visit (e.g. ?zone_id=3) doesn't
+// skip regenerating a missing QR for a tree the filter happens to exclude.
+foreach ($trees as &$tree) {
+    if (empty($tree['qr_code_path']) || !is_file(publicDir() . '/' . $tree['qr_code_path'])) {
+        $tree['qr_code_path'] = generateTreeQrCode((int) $tree['id']);
+        $pdo->prepare('UPDATE trees SET qr_code_path = :qr WHERE id = :id')
+            ->execute(['qr' => $tree['qr_code_path'], 'id' => $tree['id']]);
+    }
+}
+unset($tree);
+
 // Same filters as admin/dashboard.php — printing QR labels for the whole
 // garden every time is rarely what's wanted; usually it's "just the trees
 // I planted in zone X today" or similar.
@@ -34,16 +46,6 @@ $activeFilter = trim($_GET['active'] ?? '');
 if ($activeFilter === '1' || $activeFilter === '0') {
     $trees = array_values(array_filter($trees, fn($t) => (string) (int) $t['is_active'] === $activeFilter));
 }
-
-// Backfill QR codes for any tree that doesn't have one on disk yet.
-foreach ($trees as &$tree) {
-    if (empty($tree['qr_code_path']) || !is_file(publicDir() . '/' . $tree['qr_code_path'])) {
-        $tree['qr_code_path'] = generateTreeQrCode((int) $tree['id']);
-        $pdo->prepare('UPDATE trees SET qr_code_path = :qr WHERE id = :id')
-            ->execute(['qr' => $tree['qr_code_path'], 'id' => $tree['id']]);
-    }
-}
-unset($tree);
 ?>
 <!doctype html>
 <html lang="th">

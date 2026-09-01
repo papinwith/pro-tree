@@ -41,11 +41,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // A subtype can be linked to a category directly (subtypes.category_code)
             // independently of whether any species in that category use it —
             // the FK there would otherwise block this delete even after every
-            // species has been moved out. Unassigning is safe and matches how
-            // the rest of the app already treats "no category yet" as a normal
-            // subtype state (see subtype_form.php).
-            $pdo->prepare('UPDATE subtypes SET category_code = NULL WHERE category_code = :code')
-                ->execute(['code' => $code]);
+            // species has been moved out. When species were just reassigned to
+            // $reassignTo above, the subtype follows them there instead of
+            // going to "no category" — otherwise it ends up orphaned relative
+            // to the species now using it. A plain delete (no reassign target)
+            // still unassigns, matching how subtype_form.php already treats
+            // "no category yet" as a normal state.
+            // Reaching this point with $speciesCount > 0 means the reassign
+            // branch above is what made $canDelete true (the only other way
+            // canDelete is true is $speciesCount === 0, where there's no
+            // target to follow).
+            $subtypeTarget = $speciesCount > 0 ? $reassignTo : null;
+            $pdo->prepare('UPDATE subtypes SET category_code = :target WHERE category_code = :code')
+                ->execute(['target' => $subtypeTarget, 'code' => $code]);
             $pdo->prepare('DELETE FROM categories WHERE code = :code')->execute(['code' => $code]);
         }
     }

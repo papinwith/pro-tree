@@ -236,6 +236,19 @@ function recordSale(
     );
     $stockStmt->execute(['sid' => $speciesId, 'size' => $sizeId]);
     $stockRow = $stockStmt->fetch();
+    // A sized sale (e.g. "เล็ก") with no stock row of that exact size falls
+    // back to a sizeless bulk stock row (size_id NULL) if one exists —
+    // otherwise stock never decrements at all just because the on-hand
+    // count wasn't broken down by size yet.
+    if (!$stockRow && $sizeId !== null) {
+        $bulkStockStmt = $pdo->prepare(
+            'SELECT id, quantity FROM nursery_stock
+             WHERE species_id = :sid AND size_id IS NULL AND quantity > 0
+             ORDER BY updated_at ASC LIMIT 1'
+        );
+        $bulkStockStmt->execute(['sid' => $speciesId]);
+        $stockRow = $bulkStockStmt->fetch();
+    }
     if ($stockRow) {
         $remaining = max(0, (int) $stockRow['quantity'] - $quantity);
         $pdo->prepare(

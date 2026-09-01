@@ -105,6 +105,7 @@ $openingHours = $errors ? ($openingHours ?? '') : getSetting($pdo, 'opening_hour
 
     <label for="default_map_url">URL ปลายทางเมื่อคลิกแผนที่</label>
     <input type="url" id="default_map_url" name="default_map_url" value="<?= e($defaultMapUrl) ?>">
+    <p class="field-hint">ยังไม่ถูกใช้งานในหน้าเว็บปัจจุบัน — ตอนนี้แผนที่แสดงเป็น popup ขยายภาพเมื่อแตะ ไม่ได้ลิงก์ออกไปยัง URL นี้</p>
 
     <label for="contact_phone">เบอร์โทรติดต่อ</label>
     <input type="text" id="contact_phone" name="contact_phone" value="<?= e($contactPhone) ?>" placeholder="เช่น 081-234-5678">
