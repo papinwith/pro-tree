@@ -11,6 +11,15 @@ function db(): PDO
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_EMULATE_PREPARES => false,
         ]);
+        // Match MySQL's own session clock to Asia/Bangkok — the app's PHP
+        // side is already pinned there (config.php's
+        // date_default_timezone_set), but MySQL's NOW()/CURRENT_TIMESTAMP
+        // follow whatever timezone the server itself is configured with
+        // (commonly UTC). Without this, a value MySQL stamps with NOW()
+        // (e.g. admins.locked_until) and the same value read back and
+        // interpreted by PHP's strtotime() disagree by the server's UTC
+        // offset — up to several hours off.
+        $pdo->exec("SET time_zone = '+07:00'");
     }
     return $pdo;
 }

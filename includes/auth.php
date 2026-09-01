@@ -13,9 +13,16 @@ function startAdminSession(): void
         // HTTPS — hardcoding true would break local XAMPP dev over plain
         // HTTP (the browser silently drops a Secure cookie on a non-HTTPS
         // origin), and hardcoding false would let the session cookie travel
-        // over plain HTTP on a real deployment.
+        // over plain HTTP on a real deployment. $_SERVER['HTTPS']/SERVER_PORT
+        // alone miss the common single-box reverse-proxy setup (nginx/Apache
+        // terminates TLS, proxies to PHP-FPM over plain HTTP) — PHP would see
+        // that as an ordinary HTTP request and drop Secure even though the
+        // visitor is genuinely on https://; X-Forwarded-Proto is what the
+        // proxy sets to say so (same reasoning as APP_ENV's proxy detection
+        // in config/config.php).
         $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-            || ($_SERVER['SERVER_PORT'] ?? null) == 443;
+            || ($_SERVER['SERVER_PORT'] ?? null) == 443
+            || strtolower($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https';
         // Also raise server-side GC's own idea of session lifetime to match
         // — php.ini's session.gc_maxlifetime defaults to 1440s (24 min) on
         // most installs, which would let an idle admin's session file get
@@ -197,6 +204,18 @@ const LOGIN_LOCKOUT_THRESHOLD = 5;
 const LOGIN_LOCKOUT_MINUTES = 15;
 
 /**
+ * Deliberately identical for "no such username", "wrong password", and
+ * "account is currently locked" — a distinct lockout message would confirm
+ * a guessed username is real just by watching which text comes back
+ * (classic enumeration via account-lockout side channel), and an exact
+ * remaining-minutes figure would be its own smaller leak on top of that.
+ * The trade-off: a legitimately locked-out admin doesn't get an exact wait
+ * time either, just "later" — acceptable here since they still have other
+ * ways to notice (the failed attempts were theirs).
+ */
+const LOGIN_GENERIC_ERROR = 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง หรือบัญชีถูกล็อกชั่วคราวจากการเข้าสู่ระบบผิดพลาดหลายครั้ง กรุณาลองใหม่อีกครั้งในภายหลัง';
+
+/**
  * Unlimited password guesses against a known username was the gap here —
  * lock the account for LOGIN_LOCKOUT_MINUTES after LOGIN_LOCKOUT_THRESHOLD
  * consecutive failures. Counts per-account (not per-IP): simpler, needs no
@@ -213,9 +232,8 @@ const LOGIN_LOCKOUT_MINUTES = 15;
  * race the counter and take far more than LOGIN_LOCKOUT_THRESHOLD tries to
  * actually lock.
  *
- * Returns null on success (session is set up); otherwise a Thai message
- * for admin/login.php to show as-is (either the lockout notice or the
- * generic invalid-credentials one).
+ * Returns null on success (session is set up); otherwise LOGIN_GENERIC_ERROR
+ * for admin/login.php to show as-is.
  */
 function attemptAdminLogin(PDO $pdo, string $username, string $password): ?string
 {
@@ -225,9 +243,15 @@ function attemptAdminLogin(PDO $pdo, string $username, string $password): ?strin
     $stmt->execute(['u' => $username]);
     $admin = $stmt->fetch();
 
+    // Reaching the code below (the lock check didn't already return) means
+    // any locked_until on this row is either NULL or already in the past —
+    // so a lock that just expired is a fresh start, not "5 more on top of
+    // the old count": otherwise a single mistyped password any time after
+    // the 15 minutes is up re-locks the account for another 15 immediately,
+    // forever, since the stale counter was already sitting at the threshold.
+    $priorLockExpired = (bool) ($admin['locked_until'] ?? null);
     if ($admin && $admin['locked_until'] && strtotime($admin['locked_until']) > time()) {
-        $minutes = (int) ceil((strtotime($admin['locked_until']) - time()) / 60);
-        return "บัญชีนี้ถูกล็อกชั่วคราวจากการเข้าสู่ระบบผิดพลาดหลายครั้ง กรุณาลองใหม่ใน {$minutes} นาที";
+        return LOGIN_GENERIC_ERROR;
     }
 
     if ($admin && password_verify($password, $admin['password_hash'])) {
@@ -247,17 +271,18 @@ function attemptAdminLogin(PDO $pdo, string $username, string $password): ?strin
     if ($admin) {
         $pdo->prepare(
             'UPDATE admins
-             SET failed_login_attempts = failed_login_attempts + 1,
+             SET failed_login_attempts = IF(:priorLockExpired, 1, failed_login_attempts + 1),
                  locked_until = IF(failed_login_attempts >= :threshold,
-                                    DATE_ADD(NOW(), INTERVAL :minutes MINUTE), locked_until)
+                                    DATE_ADD(NOW(), INTERVAL :minutes MINUTE), NULL)
              WHERE id = :id'
         )->execute([
+            'priorLockExpired' => $priorLockExpired ? 1 : 0,
             'threshold' => LOGIN_LOCKOUT_THRESHOLD,
             'minutes' => LOGIN_LOCKOUT_MINUTES,
             'id' => $admin['id'],
         ]);
     }
-    return 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง';
+    return LOGIN_GENERIC_ERROR;
 }
 
 function adminLogout(): void
