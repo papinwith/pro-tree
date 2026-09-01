@@ -3,3 +3,7 @@
 config/local.php
 
 node_modules/
+
+# QR codes are regenerated automatically (see admin/qr_all.php's backfill
+# logic) from trees.id — not worth tracking as binary churn per tree.
+public/assets/uploads/qr/
