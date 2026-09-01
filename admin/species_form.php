@@ -16,7 +16,26 @@ $categories = getAllCategories($pdo);
 $subtypes = getAllSubtypes($pdo);
 $zones = getAllZones($pdo);
 $stockRows = $id ? getStockForSpecies($pdo, $id) : [];
+$stockSizes = getAllStockSizes($pdo);
+$salesRows = $id ? getSalesForSpecies($pdo, $id) : [];
 $extraSubtypeIds = $id ? getExtraSubtypeIdsForSpecies($pdo, $id) : [];
+// "โซน"/"จำนวนต้น" below are an add-more-trees action, not stored fields
+// of the species itself — they always start blank on a fresh page load
+// (see the field-hint next to them). This is the actual existing count,
+// shown read-only for context, grouped by zone since a species can already
+// have trees spread across more than one.
+$existingTreesByZone = [];
+if ($id) {
+    $stmt = $pdo->prepare(
+        'SELECT z.name AS zone_name, COUNT(*) AS tree_count
+         FROM trees t JOIN zones z ON z.id = t.zone_id
+         WHERE t.species_id = :sid
+         GROUP BY z.id, z.name
+         ORDER BY z.name ASC'
+    );
+    $stmt->execute(['sid' => $id]);
+    $existingTreesByZone = $stmt->fetchAll();
+}
 $saleStatusLabels = ['available' => 'พร้อมขาย', 'reserved' => 'จองแล้ว', 'sold_out' => 'ขายหมด', 'not_for_sale' => 'ไม่ขาย'];
 
 // Thai-only fields. English/Chinese are never entered here — they're
@@ -280,7 +299,20 @@ $currentClassificationId = $species['classification_id'] ?? '';
     <?php endforeach; ?>
 
     <div class="history-section">
-      <h2>เพิ่มต้นไม้ของชนิดพันธุ์นี้ทันที (ไม่บังคับ)</h2>
+      <h2>เพิ่มต้นไม้ของชนิดพันธุ์นี้ทันที </h2>
+      <?php if ($id): ?>
+        <?php if ($existingTreesByZone): ?>
+          <p class="field-hint">
+            ต้นที่มีอยู่แล้วตอนนี้:
+            <?= implode(', ', array_map(
+              fn($row) => e($row['zone_name']) . ' (' . (int) $row['tree_count'] . ' ต้น)',
+              $existingTreesByZone
+            )) ?>
+          </p>
+        <?php else: ?>
+          <p class="field-hint">ยังไม่มีต้นไม้ของชนิดพันธุ์นี้ในระบบ</p>
+        <?php endif; ?>
+      <?php endif; ?>
       <label for="plant_zone_id">โซน</label>
       <select id="plant_zone_id" name="plant_zone_id">
         <option value="">— ไม่เพิ่มต้นไม้ตอนนี้ —</option>
@@ -291,7 +323,7 @@ $currentClassificationId = $species['classification_id'] ?? '';
         <?php endforeach; ?>
       </select>
 
-      <label for="plant_quantity">จำนวนต้น</label>
+      <label for="plant_quantity">เพิ่มจำนวนต้น</label>
       <input type="number" id="plant_quantity" name="plant_quantity" min="0" value="<?= $v('plant_quantity', '0') ?>">
       <p class="field-hint">
         เลือกโซนแล้วใส่จำนวน ระบบจะสร้างต้นไม้ตามจำนวนนั้นให้อัตโนมัติ (แต่ละต้นมี Tree ID/QR ของตัวเอง) —
@@ -418,7 +450,7 @@ $currentClassificationId = $species['classification_id'] ?? '';
           <tbody>
             <?php foreach ($stockRows as $stock): ?>
             <tr>
-              <td><?= e($stock['size_label'] ?? '') ?></td>
+              <td><?= e($stock['size_name_th'] ?? '') ?></td>
               <td><?= (int) $stock['quantity'] ?></td>
               <td><?= $stock['price'] !== null ? number_format((float) $stock['price'], 2) : '—' ?></td>
               <td><?= e($saleStatusLabels[$stock['sale_status']] ?? $stock['sale_status']) ?></td>
@@ -444,7 +476,14 @@ $currentClassificationId = $species['classification_id'] ?? '';
       <?= csrfField() ?>
       <input type="hidden" name="species_id" value="<?= (int) $id ?>">
       <div class="field-row">
-        <label>ขนาด<input type="text" name="size_label" placeholder="เช่น เล็ก/กลาง/ใหญ่"></label>
+        <label>ขนาด
+          <select name="size_id">
+            <option value="">— ไม่ระบุ —</option>
+            <?php foreach ($stockSizes as $sizeOption): ?>
+              <option value="<?= (int) $sizeOption['id'] ?>"><?= e($sizeOption['name_th']) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </label>
         <label>จำนวน<input type="number" name="quantity" min="0" value="0" required></label>
         <label>ราคา (บาท)<input type="text" name="price" inputmode="decimal" placeholder="เช่น 350"></label>
         <label>สถานะ
@@ -457,6 +496,55 @@ $currentClassificationId = $species['classification_id'] ?? '';
         <label>ช่องทางขาย<input type="text" name="sales_channel" placeholder="เช่น เรือนเพาะชำ, ออนไลน์"></label>
       </div>
       <button class="btn btn-sm" type="submit">+ เพิ่มรายการสต็อก</button>
+    </form>
+  </section>
+
+  <section id="sales" class="history-section">
+    <h2>ประวัติการขาย</h2>
+    <?php if (isset($_GET['sale_error'])): ?>
+      <div class="flash error">ไม่ได้บันทึกการขาย — กรุณาระบุราคา/หน่วยเป็นตัวเลขมากกว่า 0</div>
+    <?php endif; ?>
+    <p class="field-hint">บันทึกการขายจริง (แยกจากสต็อก/ราคาตั้งไว้ด้านบน) — บันทึกแล้วจะตัดจำนวนออกจากสต็อกที่ตรงกันให้อัตโนมัติ</p>
+    <?php if ($salesRows): ?>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>วันที่ขาย</th><th>ขนาด</th><th>จำนวน</th><th>ราคา/หน่วย</th><th>รวม</th><th>ผู้บันทึก</th><th>หมายเหตุ</th></tr></thead>
+          <tbody>
+            <?php foreach ($salesRows as $sale): ?>
+            <tr>
+              <td><?= e($sale['sold_at']) ?></td>
+              <td><?= e($sale['size_name_th'] ?? '—') ?></td>
+              <td><?= (int) $sale['quantity'] ?></td>
+              <td><?= number_format((float) $sale['unit_price'], 2) ?></td>
+              <td><?= number_format((float) $sale['total_price'], 2) ?></td>
+              <td><?= e($sale['sold_by'] ?? '') ?></td>
+              <td><?= e($sale['notes'] ?? '') ?></td>
+            </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
+    <?php else: ?>
+      <p class="muted-note">ยังไม่มีประวัติการขาย</p>
+    <?php endif; ?>
+
+    <form method="post" action="sale_add.php" class="inline-add-form">
+      <?= csrfField() ?>
+      <input type="hidden" name="species_id" value="<?= (int) $id ?>">
+      <div class="field-row">
+        <label>ขนาด
+          <select name="size_id">
+            <option value="">— ไม่ระบุ —</option>
+            <?php foreach ($stockSizes as $sizeOption): ?>
+              <option value="<?= (int) $sizeOption['id'] ?>"><?= e($sizeOption['name_th']) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </label>
+        <label>จำนวนที่ขาย<input type="number" name="quantity" min="1" value="1" required></label>
+        <label>ราคา/หน่วย (บาท)<input type="text" name="unit_price" inputmode="decimal" placeholder="เช่น 350" required></label>
+      </div>
+      <label>หมายเหตุ<input type="text" name="notes" placeholder="เช่น ชื่อลูกค้า, ช่องทางขาย"></label>
+      <button class="btn btn-sm" type="submit">+ บันทึกการขาย</button>
     </form>
   </section>
   <?php endif; ?>

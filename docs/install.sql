@@ -118,6 +118,8 @@ CREATE TABLE zones (
     description    TEXT NULL,
     description_en TEXT NULL,
     description_zh TEXT NULL,
+    map_pin_x    DECIMAL(5,2) NULL, -- pin position on the public map banner image, % from left
+    map_pin_y    DECIMAL(5,2) NULL, -- pin position on the public map banner image, % from top
     created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
@@ -306,12 +308,31 @@ CREATE TABLE maintenance_logs (
 ) ENGINE=InnoDB;
 
 -- ---------------------------------------------------------------
+-- Stock sizes — the "เล็ก/กลาง/ใหญ่" picker in admin/species_form.php reads
+-- this table (with EN/ZH names for the public tree page) instead of a
+-- hardcoded list, so adding/renaming/reordering a size is a data change,
+-- not a code change.
+-- ---------------------------------------------------------------
+CREATE TABLE stock_sizes (
+    id             INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    name_th        VARCHAR(50) NOT NULL,
+    name_en        VARCHAR(50) NULL,
+    name_zh        VARCHAR(50) NULL,
+    display_order  INT UNSIGNED NOT NULL DEFAULT 0
+) ENGINE=InnoDB;
+
+INSERT INTO stock_sizes (name_th, name_en, name_zh, display_order) VALUES
+('เล็ก', 'Small', '小', 1),
+('กลาง', 'Medium', '中', 2),
+('ใหญ่', 'Large', '大', 3);
+
+-- ---------------------------------------------------------------
 -- Nursery Stock — sales-side info, linked to a SPECIES.
 -- ---------------------------------------------------------------
 CREATE TABLE nursery_stock (
     id             BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     species_id     BIGINT UNSIGNED NOT NULL,
-    size_label     VARCHAR(50) NULL,
+    size_id        INT UNSIGNED NULL,
     quantity       INT UNSIGNED NOT NULL DEFAULT 0,
     price          DECIMAL(10,2) NULL,
     sale_status    ENUM('available','reserved','sold_out','not_for_sale') NOT NULL DEFAULT 'not_for_sale',
@@ -319,7 +340,36 @@ CREATE TABLE nursery_stock (
     updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_stock_species FOREIGN KEY (species_id) REFERENCES species(id) ON DELETE CASCADE,
+    CONSTRAINT fk_stock_size FOREIGN KEY (size_id) REFERENCES stock_sizes(id),
     INDEX idx_stock_species (species_id)
+) ENGINE=InnoDB;
+
+-- ---------------------------------------------------------------
+-- Sale transactions — an actual completed sale (quantity, price paid,
+-- when), as opposed to nursery_stock (current on-hand listing/asking price)
+-- or tree_interests (a lead that may or may not have bought anything).
+-- Recording one here decrements the matching nursery_stock row so the
+-- listed quantity stays accurate. species_id/size_id are kept even if the
+-- stock row is later deleted, so historical revenue reporting never loses
+-- rows to an unrelated stock cleanup.
+-- ---------------------------------------------------------------
+CREATE TABLE sale_transactions (
+    id             BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    species_id     BIGINT UNSIGNED NOT NULL,
+    size_id        INT UNSIGNED NULL,
+    quantity       INT UNSIGNED NOT NULL DEFAULT 1,
+    unit_price     DECIMAL(10,2) NOT NULL,
+    total_price    DECIMAL(10,2) NOT NULL,
+    interest_id    BIGINT UNSIGNED NULL, -- optional: which lead this sale closed out
+    sold_by        VARCHAR(100) NULL,    -- admin username who recorded it
+    notes          TEXT NULL,
+    sold_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_sales_species  FOREIGN KEY (species_id)  REFERENCES species(id) ON DELETE CASCADE,
+    CONSTRAINT fk_sales_size     FOREIGN KEY (size_id)     REFERENCES stock_sizes(id),
+    CONSTRAINT fk_sales_interest FOREIGN KEY (interest_id) REFERENCES tree_interests(id) ON DELETE SET NULL,
+    INDEX idx_sales_species (species_id),
+    INDEX idx_sales_sold_at (sold_at)
 ) ENGINE=InnoDB;
 
 -- ---------------------------------------------------------------

@@ -17,7 +17,18 @@ if (!$stmt->fetchColumn()) {
     exit('ไม่พบชนิดพันธุ์นี้');
 }
 
-$sizeLabel = trim($_POST['size_label'] ?? '') ?: null;
+$sizeId = (int) ($_POST['size_id'] ?? 0);
+// A stale/tampered size_id would otherwise hit the fk_stock_size foreign
+// key and crash — validate against the real table first (same pattern as
+// subtype_id validation in species_form.php), silently dropping to "no size"
+// rather than failing the whole save over an invalid selection.
+if ($sizeId) {
+    $sizeCheck = $pdo->prepare('SELECT 1 FROM stock_sizes WHERE id = :id');
+    $sizeCheck->execute(['id' => $sizeId]);
+    if (!$sizeCheck->fetchColumn()) {
+        $sizeId = 0;
+    }
+}
 $quantity = max(0, (int) ($_POST['quantity'] ?? 0));
 $priceRaw = trim($_POST['price'] ?? '');
 $price = $priceRaw !== '' ? (float) $priceRaw : null;
@@ -28,10 +39,10 @@ if (!in_array($saleStatus, ['available', 'reserved', 'sold_out', 'not_for_sale']
 $salesChannel = trim($_POST['sales_channel'] ?? '') ?: null;
 
 $pdo->prepare(
-    'INSERT INTO nursery_stock (species_id, size_label, quantity, price, sale_status, sales_channel)
+    'INSERT INTO nursery_stock (species_id, size_id, quantity, price, sale_status, sales_channel)
      VALUES (:sid, :size, :qty, :price, :status, :channel)'
 )->execute([
-    'sid' => $speciesId, 'size' => $sizeLabel, 'qty' => $quantity,
+    'sid' => $speciesId, 'size' => $sizeId ?: null, 'qty' => $quantity,
     'price' => $price, 'status' => $saleStatus, 'channel' => $salesChannel,
 ]);
 
