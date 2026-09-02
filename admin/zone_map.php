@@ -8,9 +8,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     requireCsrf();
 
     $zoneId = (int) ($_POST['zone_id'] ?? 0);
-    $zoneCheck = $pdo->prepare('SELECT id FROM zones WHERE id = :id');
-    $zoneCheck->execute(['id' => $zoneId]);
-    if (!$zoneCheck->fetchColumn()) {
+    if (!getZoneById($pdo, $zoneId)) {
         http_response_code(404);
         exit('ไม่พบโซนนี้');
     }
@@ -32,7 +30,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $zones = getAllZones($pdo);
 $mapImage = getSetting($pdo, 'default_map_image', '');
-$mapImageUrl = $mapImage ? (str_starts_with($mapImage, 'http') ? $mapImage : '../public/' . ltrim($mapImage, '/')) : '';
+$mapImageUrl = $mapImage ? resolveAssetUrl($mapImage, '../public') : '';
 ?>
 <!doctype html>
 <html lang="th">

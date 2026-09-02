@@ -1,6 +1,6 @@
 # Tree QR Code Information System
 
-A web-based system where visitors scan a QR Code on a tree and land on that tree's public information page — no login required. The system tracks scans/visitors (without relying on IP alone), collects "interested" emails, supports Previous/Next tree browsing, and shows a clickable map banner.
+A web-based system where visitors scan a QR Code on a tree and land on that tree's public information page — no login required. The system tracks scans/visitors (without relying on IP alone), collects "interested" emails, and shows a map banner with per-zone pins and a tap-to-expand tree photo.
 
 ## Contents
 
@@ -44,7 +44,5 @@ docs/       design docs, install.sql (run this), migrations/
 
 See [`SETUP.md`](SETUP.md) to get it running.
 
-user: 
-PASS:ChangeMe123!
-
+Seed admin login: **admin** / **ChangeMe123!** — change this immediately in production (see `SETUP.md`).
 

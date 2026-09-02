@@ -138,7 +138,7 @@ $detailSections = [
 
   <?php if ($mapImage): ?>
   <div class="map-banner-wrap">
-    <img class="map-banner" id="mapBannerImage" src="<?= e(str_starts_with($mapImage, 'http') ? $mapImage : $base . '/' . ltrim($mapImage, '/')) ?>" alt="<?= e(t('map_label')) ?>" tabindex="0" role="button" aria-label="<?= e(t('expand_image_label')) ?>">
+    <img class="map-banner" id="mapBannerImage" src="<?= e(resolveAssetUrl($mapImage, $base)) ?>" alt="<?= e(t('map_label')) ?>" tabindex="0" role="button" aria-label="<?= e(t('expand_image_label')) ?>">
     <?php foreach ($mapZonePins as $z): ?>
       <button type="button" class="map-pin<?= (int) $z['id'] === (int) $tree['zone_id'] ? ' current' : '' ?>"
               style="left:<?= e((string) $z['map_pin_x']) ?>%; top:<?= e((string) $z['map_pin_y']) ?>%"

@@ -202,6 +202,17 @@ function getAllStockSizes(PDO $pdo): array
     return $pdo->query('SELECT * FROM stock_sizes ORDER BY display_order ASC, id ASC')->fetchAll();
 }
 
+/** A posted size_id is only usable if it still exists — returns it unchanged if valid, else 0 ("no size"). */
+function validateStockSizeId(PDO $pdo, int $sizeId): int
+{
+    if (!$sizeId) {
+        return 0;
+    }
+    $stmt = $pdo->prepare('SELECT 1 FROM stock_sizes WHERE id = :id');
+    $stmt->execute(['id' => $sizeId]);
+    return $stmt->fetchColumn() ? $sizeId : 0;
+}
+
 /**
  * Records an actual completed sale and, best-effort, decrements the
  * matching nursery_stock row's quantity (flipping it to sold_out once it
@@ -650,6 +661,19 @@ function publicDir(): string
 function appBasePath(): string
 {
     return rtrim((string) parse_url(APP_BASE_URL, PHP_URL_PATH), '/');
+}
+
+/**
+ * A settings/tree-stored image value (from settings.default_map_image,
+ * trees.image_path/map_image_path, etc.) is either an absolute URL an
+ * admin typed in, or a local path under public/ from an upload — resolve
+ * either into something directly usable in src=. $base is a path prefix
+ * to prepend for the local-path case: pass appBasePath() from a public/
+ * page, or a relative '../public' from an admin/ page.
+ */
+function resolveAssetUrl(string $value, string $base): string
+{
+    return str_starts_with($value, 'http') ? $value : $base . '/' . ltrim($value, '/');
 }
 
 /**

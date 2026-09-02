@@ -10,22 +10,12 @@ requireCsrf();
 
 $pdo = db();
 $speciesId = (int) ($_POST['species_id'] ?? 0);
-$stmt = $pdo->prepare('SELECT id FROM species WHERE id = :id');
-$stmt->execute(['id' => $speciesId]);
-if (!$stmt->fetchColumn()) {
+if (!getSpeciesById($pdo, $speciesId)) {
     http_response_code(404);
     exit('ไม่พบชนิดพันธุ์นี้');
 }
 
-$sizeId = (int) ($_POST['size_id'] ?? 0);
-if ($sizeId) {
-    $sizeCheck = $pdo->prepare('SELECT 1 FROM stock_sizes WHERE id = :id');
-    $sizeCheck->execute(['id' => $sizeId]);
-    if (!$sizeCheck->fetchColumn()) {
-        $sizeId = 0;
-    }
-}
-
+$sizeId = validateStockSizeId($pdo, (int) ($_POST['size_id'] ?? 0));
 $quantity = max(1, (int) ($_POST['quantity'] ?? 1));
 $unitPriceRaw = trim($_POST['unit_price'] ?? '');
 $unitPrice = is_numeric($unitPriceRaw) ? (float) $unitPriceRaw : 0.0;

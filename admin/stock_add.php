@@ -10,25 +10,16 @@ requireCsrf();
 
 $pdo = db();
 $speciesId = (int) ($_POST['species_id'] ?? 0);
-$stmt = $pdo->prepare('SELECT id FROM species WHERE id = :id');
-$stmt->execute(['id' => $speciesId]);
-if (!$stmt->fetchColumn()) {
+if (!getSpeciesById($pdo, $speciesId)) {
     http_response_code(404);
     exit('ไม่พบชนิดพันธุ์นี้');
 }
 
-$sizeId = (int) ($_POST['size_id'] ?? 0);
 // A stale/tampered size_id would otherwise hit the fk_stock_size foreign
-// key and crash — validate against the real table first (same pattern as
-// subtype_id validation in species_form.php), silently dropping to "no size"
-// rather than failing the whole save over an invalid selection.
-if ($sizeId) {
-    $sizeCheck = $pdo->prepare('SELECT 1 FROM stock_sizes WHERE id = :id');
-    $sizeCheck->execute(['id' => $sizeId]);
-    if (!$sizeCheck->fetchColumn()) {
-        $sizeId = 0;
-    }
-}
+// key and crash — validate against the real table first, silently
+// dropping to "no size" rather than failing the whole save over an
+// invalid selection.
+$sizeId = validateStockSizeId($pdo, (int) ($_POST['size_id'] ?? 0));
 $quantity = max(0, (int) ($_POST['quantity'] ?? 0));
 $priceRaw = trim($_POST['price'] ?? '');
 $price = $priceRaw !== '' ? (float) $priceRaw : null;
