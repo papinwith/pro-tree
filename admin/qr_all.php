@@ -30,22 +30,12 @@ unset($tree);
 // Same filters as admin/dashboard.php — printing QR labels for the whole
 // garden every time is rarely what's wanted; usually it's "just the trees
 // I planted in zone X today" or similar.
-$zoneFilter = (int) ($_GET['zone_id'] ?? 0);
-if ($zoneFilter) {
-    $trees = array_values(array_filter($trees, fn($t) => (int) $t['zone_id'] === $zoneFilter));
-}
-$categoryFilter = trim($_GET['category_code'] ?? '');
-if ($categoryFilter !== '') {
-    $trees = array_values(array_filter($trees, fn($t) => $t['category_code'] === $categoryFilter));
-}
-$statusFilter = trim($_GET['status'] ?? '');
-if ($statusFilter !== '' && isset($statusLabels[$statusFilter])) {
-    $trees = array_values(array_filter($trees, fn($t) => $t['status'] === $statusFilter));
-}
-$activeFilter = trim($_GET['active'] ?? '');
-if ($activeFilter === '1' || $activeFilter === '0') {
-    $trees = array_values(array_filter($trees, fn($t) => (string) (int) $t['is_active'] === $activeFilter));
-}
+$filtered = applyTreeListFilters($trees, $statusLabels);
+$trees = $filtered['trees'];
+$zoneFilter = $filtered['zone_id'];
+$categoryFilter = $filtered['category_code'];
+$statusFilter = $filtered['status'];
+$activeFilter = $filtered['active'];
 ?>
 <!doctype html>
 <html lang="th">

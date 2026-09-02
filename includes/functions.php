@@ -167,6 +167,18 @@ function getObservationsForTree(PDO $pdo, int $treeId): array
     return $stmt->fetchAll();
 }
 
+/**
+ * Just the newest observation, for callers (the public tree page, on
+ * every QR scan) that only ever display the latest measurement and would
+ * otherwise pull a tree's entire multi-year survey history to read index 0.
+ */
+function getLatestObservationForTree(PDO $pdo, int $treeId): ?array
+{
+    $stmt = $pdo->prepare('SELECT * FROM observations WHERE tree_id = :tid ORDER BY observed_at DESC, id DESC LIMIT 1');
+    $stmt->execute(['tid' => $treeId]);
+    return $stmt->fetch() ?: null;
+}
+
 /** Maintenance activity history for a tree, most recent first. */
 function getMaintenanceLogsForTree(PDO $pdo, int $treeId): array
 {
@@ -200,6 +212,42 @@ function getStockForSpecies(PDO $pdo, int $speciesId): array
 function getAllStockSizes(PDO $pdo): array
 {
     return $pdo->query('SELECT * FROM stock_sizes ORDER BY display_order ASC, id ASC')->fetchAll();
+}
+
+/**
+ * Zone/category/status/active filters shared by admin/dashboard.php and
+ * admin/qr_all.php — same $_GET keys, same narrowing logic, so a fix or a
+ * new filter only needs to happen once. Reads $_GET directly (both callers
+ * apply these to the querystring the same way); returns the filtered
+ * $trees list plus the resolved filter values the caller needs for
+ * re-rendering the filter form's selected state and building query strings.
+ */
+function applyTreeListFilters(array $trees, array $statusLabels): array
+{
+    $zoneFilter = (int) ($_GET['zone_id'] ?? 0);
+    if ($zoneFilter) {
+        $trees = array_values(array_filter($trees, fn($t) => (int) $t['zone_id'] === $zoneFilter));
+    }
+    $categoryFilter = trim($_GET['category_code'] ?? '');
+    if ($categoryFilter !== '') {
+        $trees = array_values(array_filter($trees, fn($t) => $t['category_code'] === $categoryFilter));
+    }
+    $statusFilter = trim($_GET['status'] ?? '');
+    if ($statusFilter !== '' && isset($statusLabels[$statusFilter])) {
+        $trees = array_values(array_filter($trees, fn($t) => $t['status'] === $statusFilter));
+    }
+    $activeFilter = trim($_GET['active'] ?? '');
+    if ($activeFilter === '1' || $activeFilter === '0') {
+        $trees = array_values(array_filter($trees, fn($t) => (string) (int) $t['is_active'] === $activeFilter));
+    }
+
+    return [
+        'trees' => $trees,
+        'zone_id' => $zoneFilter,
+        'category_code' => $categoryFilter,
+        'status' => $statusFilter,
+        'active' => $activeFilter,
+    ];
 }
 
 /** A posted size_id is only usable if it still exists — returns it unchanged if valid, else 0 ("no size"). */

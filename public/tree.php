@@ -29,8 +29,7 @@ $scanId = logScan(
 );
 
 // --- Latest size measurement, if staff have ever recorded one ---
-$observations = getObservationsForTree($pdo, $tree['id']);
-$latestObservation = $observations[0] ?? null;
+$latestObservation = getLatestObservationForTree($pdo, $tree['id']);
 
 // --- Nursery stock currently for sale, with price — visitors should be
 // able to see the price up front, not only after clicking "request price". ---
