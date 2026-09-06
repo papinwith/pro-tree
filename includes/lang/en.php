@@ -41,4 +41,9 @@ return [
     'opening_hours_label' => 'Opening Hours',
     'expand_image_label' => 'Expand image',
     'map_label' => 'Map — tap to enlarge',
+
+    // zone page (public/zone.php)
+    'zone_page_title_suffix' => '— Trees in This Zone',
+    'tree_count_label' => '%d trees',
+    'zone_no_trees_label' => 'No trees in this zone yet',
 ];

@@ -41,4 +41,9 @@ return [
     'opening_hours_label' => 'เวลาทำการ',
     'expand_image_label' => 'ขยายรูปภาพ',
     'map_label' => 'แผนที่ — แตะเพื่อดูภาพขยาย',
+
+    // zone page (public/zone.php)
+    'zone_page_title_suffix' => '— ต้นไม้ในโซนนี้',
+    'tree_count_label' => '%d ต้น',
+    'zone_no_trees_label' => 'ยังไม่มีต้นไม้ในโซนนี้',
 ];

@@ -111,6 +111,7 @@ img { max-width: 100%; }
 }
 
 .map-pin {
+  display: block;
   position: absolute;
   transform: translate(-50%, -100%);
   width: 20px;
@@ -122,6 +123,7 @@ img { max-width: 100%; }
   background: var(--green-600);
   box-shadow: var(--shadow-sm);
   cursor: pointer;
+  text-decoration: none;
 }
 .map-pin.current { width: 26px; height: 26px; background: var(--green-500); box-shadow: 0 0 0 4px rgba(0, 200, 83, 0.25); }
 .map-pin-label {
@@ -138,7 +140,8 @@ img { max-width: 100%; }
   white-space: nowrap;
   display: none;
 }
-.map-pin.open .map-pin-label { display: block; }
+.map-pin:hover .map-pin-label,
+.map-pin:focus-visible .map-pin-label { display: block; }
 
 .content { padding: 16px 20px 40px; }
 
@@ -232,6 +235,38 @@ h1.tree-name { font-size: 1.65rem; font-weight: 800; margin: 18px 0 2px; letter-
 .detail-section p { margin: 0; color: var(--muted); line-height: 1.6; font-size: 0.94rem; }
 
 .measurement-box { margin: 6px 0 14px; font-size: 0.9rem; color: var(--muted); }
+
+/* =================================================================
+   Zone page — grid of trees in a zone (public/zone.php)
+   ================================================================= */
+.tree-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin: 14px 0;
+}
+.tree-card {
+  display: block;
+  text-align: center;
+  text-decoration: none;
+  color: inherit;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px;
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.15s var(--ease), border-color 0.15s var(--ease);
+}
+.tree-card:hover { border-color: var(--green-400); box-shadow: var(--shadow-md); }
+.tree-card img, .tree-card-placeholder {
+  width: 100%;
+  height: 96px;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  background: var(--gray-100);
+  display: block;
+}
+.tree-card h3 { margin: 8px 0 0; font-size: 0.88rem; font-weight: 600; }
 
 .price-box, .contact-box {
   margin: 14px 0;

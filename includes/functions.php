@@ -599,6 +599,25 @@ function getTreeById(PDO $pdo, int $id): ?array
 }
 
 /**
+ * Every visible tree in a zone, for the public "trees in this zone" page —
+ * a thumbnail-grid trim of getTreeById()'s join (no species detail-section
+ * fields), same is_active=1 visibility rule.
+ */
+function getTreesByZone(PDO $pdo, int $zoneId): array
+{
+    $stmt = $pdo->prepare(
+        'SELECT t.id, t.image_path, t.status,
+                s.name, s.name_en, s.name_zh, s.name_common
+         FROM trees t
+         JOIN species s ON s.id = t.species_id
+         WHERE t.zone_id = :zid AND t.is_active = 1
+         ORDER BY t.display_order ASC'
+    );
+    $stmt->execute(['zid' => $zoneId]);
+    return $stmt->fetchAll();
+}
+
+/**
  * Builds the 15-digit plant code: ประเภทพืช(3) + รหัสชนิดพืช(3) + โซน(3) +
  * พื้นที่ในสวน(2) + ลำดับ(4). Unlike assetCode()/trees.id, this code is
  * intentionally NOT stable across a move — see recomputeTreePlantCode().

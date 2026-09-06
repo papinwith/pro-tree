@@ -139,11 +139,12 @@ $detailSections = [
   <div class="map-banner-wrap">
     <img class="map-banner" id="mapBannerImage" src="<?= e(resolveAssetUrl($mapImage, $base)) ?>" alt="<?= e(t('map_label')) ?>" tabindex="0" role="button" aria-label="<?= e(t('expand_image_label')) ?>">
     <?php foreach ($mapZonePins as $z): ?>
-      <button type="button" class="map-pin<?= (int) $z['id'] === (int) $tree['zone_id'] ? ' current' : '' ?>"
-              style="left:<?= e((string) $z['map_pin_x']) ?>%; top:<?= e((string) $z['map_pin_y']) ?>%"
-              aria-label="<?= e(localizedTreeField($z, 'name')) ?>">
+      <a class="map-pin<?= (int) $z['id'] === (int) $tree['zone_id'] ? ' current' : '' ?>"
+         href="<?= e($base) ?>/zone.php?id=<?= (int) $z['id'] ?>"
+         style="left:<?= e((string) $z['map_pin_x']) ?>%; top:<?= e((string) $z['map_pin_y']) ?>%"
+         aria-label="<?= e(localizedTreeField($z, 'name')) ?>">
         <span class="map-pin-label"><?= e(localizedTreeField($z, 'name')) ?></span>
-      </button>
+      </a>
     <?php endforeach; ?>
   </div>
   <?php endif; ?>
@@ -280,15 +281,10 @@ $detailSections = [
     form.classList.toggle('open');
   });
 
-  // Zone pins on the map banner — tap to show/hide the zone name label;
-  // must not also trigger the banner image's own tap-to-zoom lightbox.
+  // Zone pins on the map banner link to that zone's tree list — must not
+  // also trigger the banner image's own tap-to-zoom lightbox underneath.
   document.querySelectorAll('.map-pin').forEach(function (pin) {
-    pin.addEventListener('click', function (e) {
-      e.stopPropagation();
-      var wasOpen = pin.classList.contains('open');
-      document.querySelectorAll('.map-pin.open').forEach(function (p) { p.classList.remove('open'); });
-      if (!wasOpen) pin.classList.add('open');
-    });
+    pin.addEventListener('click', function (e) { e.stopPropagation(); });
   });
 
   // Tap the tree photo, or the map banner, to view it full-size in the same popup.

@@ -62,3 +62,25 @@ from the public visitor code path.
 Each tree's public URL is `{APP_BASE_URL}/tree.php?id={tree_id}` (or `/tree/{id}`
 with the rewrite rule). Feed that URL into any QR code generator library/service
 per tree once trees exist in the admin panel.
+
+## 6. Running the e2e tests
+
+Playwright smoke tests (`tests/e2e/full.spec.js`) exercise the public site,
+admin login, CSRF protection, and per-role permission gating against a
+**live, running instance** of the app (not a mock server) — install the app
+per steps 1–4 above first, then:
+
+```bash
+npm install
+npx playwright install chromium   # first run only
+npm run test:e2e
+```
+
+Points at `http://localhost/tree-siam-main` by default; override with
+`APP_BASE_URL_ROOT` if your app lives elsewhere. Uses the seed `admin` /
+`ChangeMe123!` login by default — override with `TEST_ADMIN_USER` /
+`TEST_ADMIN_PASSWORD` if you've changed it (you should have, per step 1).
+The executive/tree_admin role tests are skipped unless you set
+`TEST_EXEC_USER`/`TEST_EXEC_PASSWORD` and/or `TEST_TREE_ADMIN_USER`/
+`TEST_TREE_ADMIN_PASSWORD` — those roles aren't part of the standard seed,
+so create them via the admin panel first if you want that coverage.

@@ -41,4 +41,9 @@ return [
     'opening_hours_label' => '营业时间',
     'expand_image_label' => '放大图片',
     'map_label' => '地图 — 点击放大',
+
+    // zone page (public/zone.php)
+    'zone_page_title_suffix' => '— 本区域的树木',
+    'tree_count_label' => '%d 棵',
+    'zone_no_trees_label' => '此区域暂无树木',
 ];
