@@ -3,7 +3,8 @@
 -- adding/renaming/reordering a size is a data change, not a code change.
 -- Existing nursery_stock.size_label text values are matched to the new
 -- rows and backfilled into a new size_id column; size_label is then
--- dropped since size_id is the sole source of truth going forward.
+-- renamed to legacy_size_label (kept, not dropped — see below) since
+-- size_id is the sole source of truth going forward.
 --
 -- Run against an existing tree_qr_system database that predates this
 -- change (a fresh install via docs/install.sql already includes it).

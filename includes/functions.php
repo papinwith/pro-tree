@@ -279,51 +279,71 @@ function recordSale(
     ?string $notes
 ): int {
     $totalPrice = round($unitPrice * $quantity, 2);
-    $pdo->prepare(
-        'INSERT INTO sale_transactions (species_id, size_id, quantity, unit_price, total_price, sold_by, notes)
-         VALUES (:sid, :size, :qty, :unit, :total, :by, :notes)'
-    )->execute([
-        'sid' => $speciesId, 'size' => $sizeId, 'qty' => $quantity,
-        'unit' => $unitPrice, 'total' => $totalPrice, 'by' => $soldBy, 'notes' => $notes,
-    ]);
-    $saleId = (int) $pdo->lastInsertId();
-
-    $stockStmt = $pdo->prepare(
-        'SELECT id, quantity FROM nursery_stock
-         WHERE species_id = :sid AND size_id <=> :size AND quantity > 0
-         ORDER BY updated_at ASC'
-    );
-    $stockStmt->execute(['sid' => $speciesId, 'size' => $sizeId]);
-    $stockRows = $stockStmt->fetchAll();
-    // A sized sale (e.g. "เล็ก") with no stock row of that exact size falls
-    // back to sizeless bulk stock rows (size_id NULL) if any exist —
-    // otherwise stock never decrements at all just because the on-hand
-    // count wasn't broken down by size yet.
-    if (!$stockRows && $sizeId !== null) {
-        $bulkStockStmt = $pdo->prepare(
-            'SELECT id, quantity FROM nursery_stock
-             WHERE species_id = :sid AND size_id IS NULL AND quantity > 0
-             ORDER BY updated_at ASC'
-        );
-        $bulkStockStmt->execute(['sid' => $speciesId]);
-        $stockRows = $bulkStockStmt->fetchAll();
+    // The stock read-then-write below has to be inside a transaction with
+    // SELECT ... FOR UPDATE, not just separate queries: without a row lock,
+    // two concurrent sales of the same species/size both read the same
+    // pre-decrement quantities and the second UPDATE overwrites the first's
+    // decrement (lost update), letting on-hand stock go negative/stale.
+    $ownsTransaction = !$pdo->inTransaction();
+    if ($ownsTransaction) {
+        $pdo->beginTransaction();
     }
-    // Stock isn't guaranteed to live in a single row per species+size (staff
-    // can add stock more than once), so a sale bigger than the oldest row's
-    // on-hand count spills into the next-oldest row rather than leaving the
-    // rest of the on-hand count untouched.
-    $remainingToDecrement = $quantity;
-    $updateStmt = $pdo->prepare(
-        "UPDATE nursery_stock SET quantity = :qty, sale_status = IF(:qty2 <= 0, 'sold_out', sale_status) WHERE id = :id"
-    );
-    foreach ($stockRows as $stockRow) {
-        if ($remainingToDecrement <= 0) {
-            break;
+    try {
+        $pdo->prepare(
+            'INSERT INTO sale_transactions (species_id, size_id, quantity, unit_price, total_price, sold_by, notes)
+             VALUES (:sid, :size, :qty, :unit, :total, :by, :notes)'
+        )->execute([
+            'sid' => $speciesId, 'size' => $sizeId, 'qty' => $quantity,
+            'unit' => $unitPrice, 'total' => $totalPrice, 'by' => $soldBy, 'notes' => $notes,
+        ]);
+        $saleId = (int) $pdo->lastInsertId();
+
+        $stockStmt = $pdo->prepare(
+            'SELECT id, quantity FROM nursery_stock
+             WHERE species_id = :sid AND size_id <=> :size AND quantity > 0
+             ORDER BY updated_at ASC FOR UPDATE'
+        );
+        $stockStmt->execute(['sid' => $speciesId, 'size' => $sizeId]);
+        $stockRows = $stockStmt->fetchAll();
+        // A sized sale (e.g. "เล็ก") with no stock row of that exact size falls
+        // back to sizeless bulk stock rows (size_id NULL) if any exist —
+        // otherwise stock never decrements at all just because the on-hand
+        // count wasn't broken down by size yet.
+        if (!$stockRows && $sizeId !== null) {
+            $bulkStockStmt = $pdo->prepare(
+                'SELECT id, quantity FROM nursery_stock
+                 WHERE species_id = :sid AND size_id IS NULL AND quantity > 0
+                 ORDER BY updated_at ASC FOR UPDATE'
+            );
+            $bulkStockStmt->execute(['sid' => $speciesId]);
+            $stockRows = $bulkStockStmt->fetchAll();
         }
-        $take = min((int) $stockRow['quantity'], $remainingToDecrement);
-        $remaining = (int) $stockRow['quantity'] - $take;
-        $updateStmt->execute(['qty' => $remaining, 'qty2' => $remaining, 'id' => $stockRow['id']]);
-        $remainingToDecrement -= $take;
+        // Stock isn't guaranteed to live in a single row per species+size (staff
+        // can add stock more than once), so a sale bigger than the oldest row's
+        // on-hand count spills into the next-oldest row rather than leaving the
+        // rest of the on-hand count untouched.
+        $remainingToDecrement = $quantity;
+        $updateStmt = $pdo->prepare(
+            "UPDATE nursery_stock SET quantity = :qty, sale_status = IF(:qty2 <= 0, 'sold_out', sale_status) WHERE id = :id"
+        );
+        foreach ($stockRows as $stockRow) {
+            if ($remainingToDecrement <= 0) {
+                break;
+            }
+            $take = min((int) $stockRow['quantity'], $remainingToDecrement);
+            $remaining = (int) $stockRow['quantity'] - $take;
+            $updateStmt->execute(['qty' => $remaining, 'qty2' => $remaining, 'id' => $stockRow['id']]);
+            $remainingToDecrement -= $take;
+        }
+
+        if ($ownsTransaction) {
+            $pdo->commit();
+        }
+    } catch (\Throwable $e) {
+        if ($ownsTransaction) {
+            $pdo->rollBack();
+        }
+        throw $e;
     }
 
     return $saleId;
