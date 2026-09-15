@@ -39,22 +39,6 @@ $mapImageUrl = $mapImage ? resolveAssetUrl($mapImage, '../public') : '';
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ผู้ดูแลระบบ — ปักหมุดโซนบนแผนที่</title>
 <link rel="stylesheet" href="../public/assets/css/style.css">
-<style>
-  .zone-map-wrap { position: relative; display: inline-block; max-width: 100%; }
-  .zone-map-wrap img { display: block; max-width: 100%; border: 1px solid var(--border); border-radius: var(--radius-md); }
-  .zone-map-pin {
-    position: absolute; transform: translate(-50%, -100%);
-    width: 22px; height: 22px; border-radius: 50% 50% 50% 0;
-    background: var(--green-500); border: 2px solid #fff; box-shadow: var(--shadow-sm);
-    cursor: pointer; rotate: -45deg;
-  }
-  .zone-map-pin.selected { background: var(--red-600); }
-  .zone-map-pin-label {
-    position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%);
-    background: var(--text); color: #fff; font-size: 0.75rem; padding: 2px 7px;
-    border-radius: var(--radius-sm); white-space: nowrap; pointer-events: none;
-  }
-</style>
 </head>
 <body>
 <div class="admin-wrap">
@@ -83,13 +67,13 @@ $mapImageUrl = $mapImage ? resolveAssetUrl($mapImage, '../public') : '';
     <button class="btn btn-sm btn-danger" type="button" id="removePinBtn">ลบหมุดของโซนที่เลือก</button>
   </p>
 
-  <div class="zone-map-wrap" id="zoneMapWrap">
+  <div class="pin-picker-wrap" id="zoneMapWrap">
     <img src="<?= e($mapImageUrl) ?>" id="zoneMapImage" alt="แผนที่">
     <?php foreach ($zones as $z): if ($z['map_pin_x'] === null || $z['map_pin_y'] === null) continue; ?>
-      <div class="zone-map-pin" data-zone-id="<?= (int) $z['id'] ?>"
+      <div class="pin-picker-pin" data-zone-id="<?= (int) $z['id'] ?>"
            style="left:<?= e((string) $z['map_pin_x']) ?>%; top:<?= e((string) $z['map_pin_y']) ?>%"
            title="<?= e($z['name']) ?>">
-        <span class="zone-map-pin-label"><?= e($z['name']) ?></span>
+        <span class="pin-picker-pin-label"><?= e($z['name']) ?></span>
       </div>
     <?php endforeach; ?>
   </div>
@@ -109,7 +93,7 @@ $mapImageUrl = $mapImage ? resolveAssetUrl($mapImage, '../public') : '';
     var img = document.getElementById('zoneMapImage');
     var form = document.getElementById('pinForm');
 
-    wrap.querySelectorAll('.zone-map-pin').forEach(function (pin) {
+    wrap.querySelectorAll('.pin-picker-pin').forEach(function (pin) {
       pin.addEventListener('click', function (e) {
         e.stopPropagation();
         select.value = pin.dataset.zoneId;
@@ -118,7 +102,7 @@ $mapImageUrl = $mapImage ? resolveAssetUrl($mapImage, '../public') : '';
     });
 
     function highlightSelected() {
-      wrap.querySelectorAll('.zone-map-pin').forEach(function (pin) {
+      wrap.querySelectorAll('.pin-picker-pin').forEach(function (pin) {
         pin.classList.toggle('selected', pin.dataset.zoneId === select.value);
       });
     }

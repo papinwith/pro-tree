@@ -61,6 +61,7 @@ stable `permission_key` used in code and in the `role_permissions` table
 | | `species.manage` | CRUD plant species (name, care, characteristics, etc.) |
 | | `zone.manage` | CRUD zones/locations |
 | | `origin.manage` | CRUD plant origins/provenance — **new concept, see §12** |
+| | `plan.manage` | CRUD planting plans — future/intended plantings recorded before a tree row exists |
 | | `tree.relationship.manage` | Set/rewire a tree's Previous/Next neighbor links (`tree_relationships` — see [`tree-identity-and-relationships.md`](tree-identity-and-relationships.md) §4) |
 | | `tree.location.manage` | Move a tree to a new location/zone/origin (writes `plant_location_history`, triggers `plant_code` recompute — see [`tree-identity-and-relationships.md`](tree-identity-and-relationships.md) §5) |
 | **QR** | `qrcode.manage` | Generate/regenerate QR codes, view/download QR sheets |
@@ -105,6 +106,7 @@ granted.
 | `species.manage` | ✓ | — | ✓ |
 | `zone.manage` | ✓ | — | ✓ |
 | `origin.manage` | ✓ | — | ✓ |
+| `plan.manage` | ✓ | — | ✓ |
 | `qrcode.manage` | ✓ | — | ✓ |
 | `translation.request` | ✓ | — | ✓ |
 | `translation.review` | ✓ | — | ✓ |
@@ -299,6 +301,7 @@ table in `page-flow.md`, which doesn't match the real file-based routes).
 | `admin/species.php`, `admin/species_form.php`, `admin/species_delete.php` | `species.manage` |
 | `admin/categories.php`, `admin/category_form.php`, `admin/category_delete.php` | `category.manage` |
 | *(planned)* `admin/origins.php` / `admin/origin_form.php` | `origin.manage` |
+| `admin/plans.php`, `admin/plan_form.php`, `admin/plan_delete.php` | `plan.manage` |
 | `admin/observation_add.php`, `admin/maintenance_add.php`, `admin/stock_add.php` + their `*_delete.php` | `tree.update` |
 | `admin/interests.php`, `admin/interest_update.php` | `interest.view` (list) / `interest.manage` (status update) |
 | `admin/reports.php` | `reports.export` + relevant `stats.*.view` |

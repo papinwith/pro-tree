@@ -188,6 +188,29 @@ function getMaintenanceLogsForTree(PDO $pdo, int $treeId): array
 }
 
 /**
+ * All planting plans (future/intended plantings), joined with the zone and
+ * species names so list pages don't need a lookup per row. Newest target
+ * date first, undated plans last.
+ */
+function getAllPlantingPlans(PDO $pdo): array
+{
+    return $pdo->query(
+        'SELECT pp.*, z.name AS zone_name, sp.name AS species_name
+         FROM planting_plans pp
+         JOIN zones z ON z.id = pp.zone_id
+         LEFT JOIN species sp ON sp.id = pp.species_id
+         ORDER BY pp.target_date IS NULL, pp.target_date ASC, pp.id DESC'
+    )->fetchAll();
+}
+
+function getPlantingPlanById(PDO $pdo, int $id): ?array
+{
+    $stmt = $pdo->prepare('SELECT * FROM planting_plans WHERE id = :id');
+    $stmt->execute(['id' => $id]);
+    return $stmt->fetch() ?: null;
+}
+
+/**
  * All nursery stock rows for a species, most recently updated first —
  * joined with stock_sizes so callers get size_name/_en/_zh directly
  * instead of a separate lookup per row. `size_name` (no suffix, = Thai) is

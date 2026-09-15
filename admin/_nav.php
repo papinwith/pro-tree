@@ -9,9 +9,11 @@
 $masterDataLinks = [];
 if (can('zone.manage')) $masterDataLinks[] = ['zones.php', 'โซน'];
 if (can('zone.manage')) $masterDataLinks[] = ['zone_map.php', 'ปักหมุดโซนบนแผนที่'];
+if (can('zone.manage')) $masterDataLinks[] = ['map_admin.php', 'แผนที่รวม'];
 if (can('category.manage')) $masterDataLinks[] = ['categories.php', 'ประเภทพืช'];
 if (can('category.manage')) $masterDataLinks[] = ['subtypes.php', 'ชนิด'];
 if (can('species.manage')) $masterDataLinks[] = ['species.php', 'ชื่อต้นไม้'];
+if (can('plan.manage')) $masterDataLinks[] = ['plans.php', 'แผนการปลูก'];
 
 $reportLinks = [];
 if (can('dashboard.view')) $reportLinks[] = ['executive_dashboard.php', 'แดชบอร์ดผู้บริหาร'];

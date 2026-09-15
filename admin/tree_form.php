@@ -24,6 +24,8 @@ $categoriesByCode = array_column(getAllCategories($pdo), null, 'code');
 $subtypes = getAllSubtypes($pdo);
 $subtypesById = array_column($subtypes, null, 'id');
 $zones = getAllZones($pdo);
+$mapImage = getSetting($pdo, 'default_map_image', '');
+$mapImageUrl = $mapImage ? resolveAssetUrl($mapImage, '../public') : '';
 $statuses = ['healthy' => 'สมบูรณ์', 'needs_attention' => 'ต้องดูแล', 'removed' => 'นำออกแล้ว'];
 $healthLabels = ['good' => 'ดี', 'fair' => 'พอใช้', 'poor' => 'ทรุดโทรม'];
 $observations = $id ? getObservationsForTree($pdo, $id) : [];
@@ -60,6 +62,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($lngInput !== '' && (!is_numeric($lngInput) || $longitude < -180 || $longitude > 180)) {
         $errors[] = 'ลองจิจูดต้องอยู่ระหว่าง -180 ถึง 180';
     }
+
+    // Click-to-place % pin on the map banner image (see docs/map-system.md
+    // §1a) — a purely visual position, independent of the GPS lat/lng
+    // above (a static banner image can't yield real GPS degrees).
+    $pinXInput = trim($_POST['map_pin_x'] ?? '');
+    $pinYInput = trim($_POST['map_pin_y'] ?? '');
+    $mapPinX = $pinXInput !== '' ? max(0, min(100, (float) $pinXInput)) : null;
+    $mapPinY = $pinYInput !== '' ? max(0, min(100, (float) $pinYInput)) : null;
 
     // Only present (and only meaningful) when creating — lets staff plant
     // several identical trees of the same species/zone in one submit,
@@ -116,6 +126,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'slug' => $slug,
             'image_path' => $imagePath, 'map_image_path' => $mapImagePath, 'map_url' => $mapUrl,
             'latitude' => $latitude, 'longitude' => $longitude, 'location_updated_at' => $locationUpdatedAt,
+            'map_pin_x' => $mapPinX, 'map_pin_y' => $mapPinY,
             'is_active' => $isActive,
         ];
 
@@ -127,6 +138,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'UPDATE trees SET species_id=:species_id, zone_id=:zone_id, area_code=:area_code, label=:label, status=:status,
                      slug=:slug, image_path=:image_path, map_image_path=:map_image_path, map_url=:map_url,
                      latitude=:latitude, longitude=:longitude, location_updated_at=:location_updated_at,
+                     map_pin_x=:map_pin_x, map_pin_y=:map_pin_y,
                      is_active=:is_active
                      WHERE id=:id'
                 );
@@ -136,9 +148,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $maxOrder = (int) $pdo->query('SELECT COALESCE(MAX(display_order), 0) FROM trees')->fetchColumn();
                 $insertStmt = $pdo->prepare(
                     'INSERT INTO trees (species_id, zone_id, area_code, label, status, slug, image_path, map_image_path, map_url,
-                     latitude, longitude, location_updated_at, display_order, is_active)
+                     latitude, longitude, location_updated_at, map_pin_x, map_pin_y, display_order, is_active)
                      VALUES (:species_id, :zone_id, :area_code, :label, :status, :slug, :image_path, :map_image_path, :map_url,
-                     :latitude, :longitude, :location_updated_at, :display_order, :is_active)'
+                     :latitude, :longitude, :location_updated_at, :map_pin_x, :map_pin_y, :display_order, :is_active)'
                 );
                 // Recompute each tree's plant_code right after inserting it
                 // (not in a separate pass afterwards) — recomputeTreePlantCode()
@@ -200,6 +212,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'species_id' => $speciesId, 'zone_id' => $zoneId, 'area_code' => $areaCode, 'label' => $label, 'status' => $status,
         'slug' => $slug, 'map_url' => $mapUrlInput, 'is_active' => $isActive,
         'latitude' => $latitude, 'longitude' => $longitude, 'quantity' => $quantity,
+        'map_pin_x' => $mapPinX, 'map_pin_y' => $mapPinY,
     ]);
 }
 
@@ -260,6 +273,9 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
     </select>
     <p class="field-hint">เลือกประเภทพืช/ชนิดก่อน เพื่อกรองรายการชื่อต้นไม้ด้านล่างให้เลือกง่ายขึ้น</p>
 
+    <label for="species_search">ค้นหาชื่อต้นไม้</label>
+    <input type="search" id="species_search" placeholder="พิมพ์ค้นหาชื่อต้นไม้..." oninput="filterSpecies()">
+
     <label for="species_id">ชื่อต้นไม้</label>
     <select id="species_id" name="species_id" required onchange="updateSpeciesDetails(this.value)">
       <option value="">— เลือกชื่อต้นไม้ —</option>
@@ -319,11 +335,29 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
       <?php endif; ?>
     </p>
 
+    <label>ตำแหน่งบนแผนที่ (คลิกปักหมุด, ไม่บังคับ)</label>
+    <?php if (!$mapImageUrl): ?>
+      <p class="field-hint">ยังไม่ได้ตั้งค่ารูปแผนที่เริ่มต้น — ไปที่หน้า <a href="settings.php">ตั้งค่า</a> ก่อนถึงจะปักหมุดได้</p>
+    <?php else: ?>
+      <div data-pin-field>
+        <div class="pin-picker-wrap" data-pin-image-wrap>
+          <img src="<?= e($mapImageUrl) ?>" alt="แผนที่">
+          <?php if ($tree['map_pin_x'] !== null && $tree['map_pin_y'] !== null): ?>
+            <div class="pin-picker-pin" data-pin-marker style="left:<?= e((string) $tree['map_pin_x']) ?>%; top:<?= e((string) $tree['map_pin_y']) ?>%"></div>
+          <?php endif; ?>
+        </div>
+        <input type="hidden" name="map_pin_x" data-pin-x value="<?= $v('map_pin_x') ?>">
+        <input type="hidden" name="map_pin_y" data-pin-y value="<?= $v('map_pin_y') ?>">
+        <p><button type="button" class="btn-outline btn-sm" data-pin-remove>ลบหมุด</button></p>
+      </div>
+      <p class="field-hint">คลิกบนรูปแผนที่เพื่อปักตำแหน่งคร่าวๆ — เป็นคนละค่ากับพิกัด GPS ด้านบน (รูปแผนที่ไม่ใช่แผนที่จริงจึงไม่มีพิกัด GPS ให้อ้างอิง)</p>
+    <?php endif; ?>
+
     <label for="image">รูปภาพต้นไม้</label>
     <?php if (!empty($tree['image_path'])): ?>
-      <p><img src="../public/<?= e($tree['image_path']) ?>" alt="" class="preview-thumb"></p>
+      <img src="../public/<?= e($tree['image_path']) ?>" alt="" class="preview-thumb" id="image-preview">
     <?php endif; ?>
-    <input type="file" id="image" name="image" accept="image/jpeg,image/png,image/gif,image/webp">
+    <input type="file" id="image" name="image" accept="image/jpeg,image/png,image/gif,image/webp" data-preview-target="image-preview">
 
     <?php if (!$id): ?>
     <label for="quantity">จำนวนต้น</label>
@@ -384,11 +418,13 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
   function filterSpecies() {
     var categoryCode = document.getElementById('category_code').value;
     var subtypeId = document.getElementById('subtype_filter').value;
+    var searchTerm = document.getElementById('species_search').value.trim().toLowerCase();
     var select = document.getElementById('species_id');
     var options = select.querySelectorAll('option[value]:not([value=""])');
     options.forEach(function (opt) {
       var match = (!categoryCode || opt.dataset.category === categoryCode)
-        && (!subtypeId || opt.dataset.subtype === subtypeId);
+        && (!subtypeId || opt.dataset.subtype === subtypeId)
+        && (!searchTerm || opt.textContent.toLowerCase().indexOf(searchTerm) !== -1);
       opt.hidden = !match;
     });
     var current = select.options[select.selectedIndex];
@@ -503,5 +539,7 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
   <?php endif; ?>
 </div>
 <?php require __DIR__ . '/_confirm_modal.php'; ?>
+<script src="../public/assets/js/map-pin-picker.js"></script>
+<script src="../public/assets/js/image-preview.js"></script>
 </body>
 </html>

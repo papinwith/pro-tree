@@ -775,6 +775,30 @@ h1.tree-name { font-size: 1.65rem; font-weight: 800; margin: 18px 0 2px; letter-
 }
 
 /* =================================================================
+   Admin pin picker — shared by admin/zone_map.php, the tree/plan forms'
+   click-to-place picker, and admin/map_admin.php's combined overview.
+   Deliberately namespaced .pin-picker-* (not .map-pin*, which is already
+   used with different rules by the public tree.php banner). Position is
+   always a % of the banner image (see docs/map-system.md §1a), never real
+   GPS.
+   ================================================================= */
+.pin-picker-wrap { position: relative; display: inline-block; max-width: 100%; }
+.pin-picker-wrap img { display: block; max-width: 100%; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.pin-picker-pin {
+  position: absolute; transform: translate(-50%, -100%);
+  width: 22px; height: 22px; border-radius: 50% 50% 50% 0;
+  background: var(--green-500); border: 2px solid #fff; box-shadow: var(--shadow-sm);
+  cursor: pointer; rotate: -45deg;
+}
+.pin-picker-pin.selected { background: var(--red-600); }
+.pin-picker-pin.pin-picker-pin-plan { background: var(--amber-600); border-style: dashed; }
+.pin-picker-pin-label {
+  position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%);
+  background: var(--text); color: #fff; font-size: 0.75rem; padding: 2px 7px;
+  border-radius: var(--radius-sm); white-space: nowrap; pointer-events: none;
+}
+
+/* =================================================================
    Responsive
    ================================================================= */
 @media (max-width: 640px) {

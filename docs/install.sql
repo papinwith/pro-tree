@@ -205,6 +205,8 @@ CREATE TABLE trees (
     latitude            DECIMAL(10,7) NULL,
     longitude           DECIMAL(10,7) NULL,
     location_updated_at DATETIME NULL,
+    map_pin_x          DECIMAL(5,2) NULL, -- pin position on the public map banner image, % from left
+    map_pin_y          DECIMAL(5,2) NULL, -- pin position on the public map banner image, % from top
     display_order      INT NOT NULL,
     is_active          TINYINT(1) NOT NULL DEFAULT 1,
     created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -214,6 +216,33 @@ CREATE TABLE trees (
     CONSTRAINT fk_trees_zone    FOREIGN KEY (zone_id)    REFERENCES zones(id),
     INDEX idx_trees_species (species_id),
     INDEX idx_trees_zone (zone_id)
+) ENGINE=InnoDB;
+
+-- ---------------------------------------------------------------
+-- Planting plans — a future/intended planting recorded before any actual
+-- tree row exists for it: target zone/species, quantity, target date, an
+-- optional GPS point and a reference photo, plus free-text notes.
+-- ---------------------------------------------------------------
+CREATE TABLE planting_plans (
+    id                BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    zone_id           BIGINT UNSIGNED NOT NULL,
+    species_id        BIGINT UNSIGNED NULL, -- nullable: species may not be decided yet when the plan is first recorded
+    planned_quantity  INT UNSIGNED NOT NULL DEFAULT 1,
+    target_date       DATE NULL,
+    latitude          DECIMAL(10,7) NULL,
+    longitude         DECIMAL(10,7) NULL,
+    map_pin_x         DECIMAL(5,2) NULL, -- pin position on the public map banner image, % from left
+    map_pin_y         DECIMAL(5,2) NULL, -- pin position on the public map banner image, % from top
+    image_path        VARCHAR(255) NULL, -- reference photo/sketch of the planned spot
+    status            ENUM('pending','in_progress','completed','cancelled') NOT NULL DEFAULT 'pending',
+    notes             TEXT NULL,
+    created_by        VARCHAR(150) NULL,
+    created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_planting_plans_zone    FOREIGN KEY (zone_id)    REFERENCES zones(id),
+    CONSTRAINT fk_planting_plans_species FOREIGN KEY (species_id) REFERENCES species(id),
+    INDEX idx_planting_plans_zone (zone_id),
+    INDEX idx_planting_plans_status (status)
 ) ENGINE=InnoDB;
 
 -- ---------------------------------------------------------------
@@ -614,7 +643,8 @@ INSERT INTO permissions (permission_key, module, description) VALUES
 ('revenue.view', 'reporting', 'ข้อมูลราคา/ยอดขาย (ถ้ามี)'),
 ('reports.export', 'reporting', 'ส่งออกรายงานเป็น CSV'),
 ('map.settings.manage', 'system', 'ตั้งค่าแผนที่เริ่มต้นของทั้งระบบ'),
-('settings.manage', 'system', 'ตั้งค่าระดับระบบ (โลโก้ ฯลฯ)');
+('settings.manage', 'system', 'ตั้งค่าระดับระบบ (โลโก้ ฯลฯ)'),
+('plan.manage', 'master_data', 'จัดการแผนการปลูกต้นไม้ล่วงหน้า');
 
 -- role_permissions grants (see docs/rbac.md §4 matrix)
 INSERT INTO role_permissions (role_id, permission_id)
@@ -636,7 +666,7 @@ WHERE r.role_key = 'tree_admin'
     'tree.view', 'tree.create', 'tree.update', 'tree.status.manage', 'tree.image.manage',
     'tree.order.manage', 'tree.map.manage', 'tree.relationship.manage', 'tree.location.manage',
     'category.manage', 'species.manage', 'zone.manage', 'origin.manage', 'qrcode.manage',
-    'translation.request', 'translation.review',
+    'translation.request', 'translation.review', 'plan.manage',
     'scan.view', 'stats.tree.view'
   );
 
