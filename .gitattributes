@@ -1,0 +1,4 @@
+# Shell scripts must keep LF endings — a CRLF shebang breaks them inside
+# the Linux container that actually runs them (docker/entrypoint.sh).
+*.sh text eol=lf
+Dockerfile text eol=lf

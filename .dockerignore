@@ -1,0 +1,9 @@
+.git
+node_modules
+# Only the top-level composer vendor/ (empty — no real dependencies), NOT
+# includes/vendor/phpqrcode, which is needed at runtime for QR generation.
+/vendor
+test-results
+playwright-report
+tests
+config/local.php
