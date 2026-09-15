@@ -1,0 +1,10 @@
+{
+    "name": "papinwith/pro-tree",
+    "description": "Living Plant Asset & Nursery Stock Management System (plain PHP, no framework)",
+    "type": "project",
+    "require": {
+        "php": ">=8.0",
+        "ext-pdo_mysql": "*",
+        "ext-gd": "*"
+    }
+}
