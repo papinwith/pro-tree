@@ -6,6 +6,12 @@ node_modules/
 test-results/
 playwright-report/
 
+# Composer's own autoloader output (this project has zero real dependencies
+# — composer.json exists only so hosts auto-detect PHP — so there's nothing
+# here worth committing; includes/vendor/phpqrcode is unrelated and stays
+# committed as-is).
+/vendor/
+
 # QR codes are regenerated automatically (see admin/qr_all.php's backfill
 # logic) from trees.id — not worth tracking as binary churn per tree.
 public/assets/uploads/qr/
