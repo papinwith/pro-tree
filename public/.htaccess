@@ -1,0 +1,4 @@
+RewriteEngine On
+
+# Pretty URL: /tree/{id} -> tree.php?id={id}
+RewriteRule ^tree/([0-9]+)/?$ tree.php?id=$1 [L,QSA]
