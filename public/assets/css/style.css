@@ -639,6 +639,7 @@ h1.tree-name { font-size: 1.65rem; font-weight: 800; margin: 18px 0 2px; letter-
 .admin-wrap-narrow { max-width: 620px; }
 .admin-wrap-login { max-width: 380px; }
 .field-hint { margin: 3px 0 0; font-size: 0.82rem; color: var(--muted); }
+.field-hint-error { color: var(--red-600); }
 .preview-thumb { max-width: 160px; border-radius: var(--radius-sm); display: block; margin-bottom: 8px; box-shadow: var(--shadow-sm); }
 .table-thumb { width: 48px; height: 48px; object-fit: cover; border-radius: var(--radius-sm); display: block; }
 .preview-wide { max-width: 100%; border-radius: var(--radius-sm); display: block; margin-bottom: 8px; box-shadow: var(--shadow-sm); }

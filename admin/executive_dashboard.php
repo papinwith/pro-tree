@@ -25,7 +25,12 @@ $categoryPeriod = ($_GET['category_period'] ?? 'month') === 'year' ? 'year' : 'm
 // Year list for the picker — every year that actually has a scan, plus the
 // current year even if it has none yet (so a fresh install still has
 // something selectable). Newest first.
-$scanYears = $pdo->query('SELECT DISTINCT YEAR(scanned_at) FROM tree_scans ORDER BY 1 DESC')->fetchAll(PDO::FETCH_COLUMN);
+$scanYears = $pdo->query('SELECT DISTINCT EXTRACT(YEAR FROM scanned_at)::integer FROM tree_scans ORDER BY 1 DESC')->fetchAll(PDO::FETCH_COLUMN);
+// Postgres returns every column through PDO as a string (unlike pdo_mysql's
+// native-int mode for a computed integer expression) — cast explicitly so
+// the strict in_array() comparison below still matches $currentYear (a real
+// PHP int) regardless of which driver ran the query above.
+$scanYears = array_map('intval', $scanYears);
 $currentYear = (int) date('Y');
 if (!in_array($currentYear, $scanYears, true)) {
     array_unshift($scanYears, $currentYear);
@@ -97,7 +102,7 @@ $topTrees = $pdo->query(
      LEFT JOIN tree_scans sc ON sc.tree_id = t.id
      LEFT JOIN tree_interests ti ON ti.tree_id = t.id
      GROUP BY sp.id, sp.name
-     HAVING scan_count > 0
+     HAVING COUNT(DISTINCT sc.id) > 0
      ORDER BY scan_count DESC
      $topTreesLimitSql"
 )->fetchAll();
@@ -105,7 +110,7 @@ $topTrees = $pdo->query(
 $trend = $pdo->query(
     "SELECT DATE(scanned_at) AS scan_date, COUNT(*) AS scan_count
      FROM tree_scans
-     WHERE scanned_at >= (NOW() - INTERVAL 6 DAY)
+     WHERE scanned_at >= (NOW() - INTERVAL '6 days')
      GROUP BY DATE(scanned_at)
      ORDER BY scan_date ASC"
 )->fetchAll();

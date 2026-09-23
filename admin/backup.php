@@ -15,8 +15,11 @@ if (isset($_GET['download'])) {
 }
 
 $tableCounts = [];
-foreach ($pdo->query('SHOW TABLES')->fetchAll(PDO::FETCH_COLUMN) as $table) {
-    $tableCounts[$table] = (int) $pdo->query('SELECT COUNT(*) FROM `' . $table . '`')->fetchColumn();
+$tableNames = $pdo->query(
+    "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename"
+)->fetchAll(PDO::FETCH_COLUMN);
+foreach ($tableNames as $table) {
+    $tableCounts[$table] = (int) $pdo->query('SELECT COUNT(*) FROM "' . $table . '"')->fetchColumn();
 }
 ?>
 <!doctype html>
@@ -51,8 +54,9 @@ foreach ($pdo->query('SHOW TABLES')->fetchAll(PDO::FETCH_COLUMN) as $table) {
   </div>
 
   <p class="field-hint">
-    ไฟล์ SQL นี้กู้คืนได้ด้วยคำสั่ง <code>mysql -u root -p tree_qr_system &lt; ไฟล์.sql</code> —
-    ดูรายละเอียดเพิ่มเติมใน <code>SETUP.md</code>
+    ไฟล์นี้มีเฉพาะ "ข้อมูล" (ไม่มีโครงสร้างตาราง) — กู้คืนโดยรัน
+    <code>docs/install.postgres.sql</code> ก่อน (โครงสร้าง) แล้วค่อยโหลดไฟล์นี้ด้วยคำสั่ง
+    <code>psql "$DATABASE_URL" -f ไฟล์.sql</code> — ดูรายละเอียดเพิ่มเติมใน <code>SETUP.md</code>
   </p>
 </div>
 </body>

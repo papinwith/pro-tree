@@ -328,9 +328,14 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
     <div class="field-row">
       <input type="text" id="latitude" name="latitude" inputmode="decimal" placeholder="ละติจูด เช่น 13.7563" value="<?= $v('latitude') ?>">
       <input type="text" id="longitude" name="longitude" inputmode="decimal" placeholder="ลองจิจูด เช่น 100.5018" value="<?= $v('longitude') ?>">
+      <button type="button" class="btn-outline btn-sm" data-geolocate
+              data-lat-target="latitude" data-lng-target="longitude" data-status-target="location-status">
+        📍 ใช้ตำแหน่งปัจจุบัน
+      </button>
     </div>
+    <p class="field-hint" id="location-status" data-geolocate-status hidden></p>
     <p class="field-hint">
-      ปล่อยว่างไว้ถ้ายังไม่ได้สำรวจตำแหน่ง — เปิดแอปแผนที่บนมือถือแล้วคัดลอกพิกัดจากตำแหน่งปัจจุบันมาวางได้เลย
+      ปล่อยว่างไว้ถ้ายังไม่ได้สำรวจตำแหน่ง — กดปุ่ม "ใช้ตำแหน่งปัจจุบัน" ด้านบนตอนยืนอยู่หน้าต้นไม้จริง หรือเปิดแอปแผนที่บนมือถือแล้วคัดลอกพิกัดมาวางเองก็ได้
       <?php if (!empty($tree['location_updated_at'])): ?>
         (บันทึกพิกัดล่าสุดเมื่อ <?= e($tree['location_updated_at']) ?>)
       <?php endif; ?>
@@ -343,7 +348,7 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
       <div data-pin-field>
         <div class="pin-picker-wrap" data-pin-image-wrap>
           <img src="<?= e($mapImageUrl) ?>" alt="แผนที่">
-          <?php if ($tree['map_pin_x'] !== null && $tree['map_pin_y'] !== null): ?>
+          <?php if (($tree['map_pin_x'] ?? null) !== null && ($tree['map_pin_y'] ?? null) !== null): ?>
             <div class="pin-picker-pin" data-pin-marker style="left:<?= e((string) $tree['map_pin_x']) ?>%; top:<?= e((string) $tree['map_pin_y']) ?>%"></div>
           <?php endif; ?>
         </div>
@@ -354,11 +359,15 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
       <p class="field-hint">คลิกบนรูปแผนที่เพื่อปักตำแหน่งคร่าวๆ — เป็นคนละค่ากับพิกัด GPS ด้านบน (รูปแผนที่ไม่ใช่แผนที่จริงจึงไม่มีพิกัด GPS ให้อ้างอิง)</p>
     <?php endif; ?>
 
-    <label for="image">รูปภาพต้นไม้</label>
+    <label>รูปภาพต้นไม้</label>
     <?php if (!empty($tree['image_path'])): ?>
       <img src="../public/<?= e($tree['image_path']) ?>" alt="" class="preview-thumb" id="image-preview">
     <?php endif; ?>
-    <input type="file" id="image" name="image" accept="image/jpeg,image/png,image/gif,image/webp" data-preview-target="image-preview">
+    <div class="field-row" data-photo-capture-for="image">
+      <button type="button" class="btn-outline btn-sm" data-photo-action="camera">📷 ถ่ายรูป</button>
+      <button type="button" class="btn-outline btn-sm" data-photo-action="gallery">🖼️ เลือกจากคลังภาพ</button>
+    </div>
+    <input type="file" id="image" name="image" accept="image/jpeg,image/png,image/gif,image/webp" data-preview-target="image-preview" hidden>
 
     <?php if (!$id): ?>
     <label for="quantity">จำนวนต้น</label>
@@ -542,5 +551,7 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
 <?php require __DIR__ . '/_confirm_modal.php'; ?>
 <script src="../public/assets/js/map-pin-picker.js"></script>
 <script src="../public/assets/js/image-preview.js"></script>
+<script src="../public/assets/js/geolocate-button.js"></script>
+<script src="../public/assets/js/photo-capture-buttons.js"></script>
 </body>
 </html>

@@ -1,10 +1,34 @@
 <?php
-// Database connection settings — adjust for your environment.
-define('DB_HOST', getenv('DB_HOST') ?: '127.0.0.1');
-define('DB_NAME', getenv('DB_NAME') ?: 'tree_qr_system');
-define('DB_USER', getenv('DB_USER') ?: 'root');
-define('DB_PASS', getenv('DB_PASS') ?: '');
-define('DB_CHARSET', 'utf8mb4');
+// Machine-specific overrides (API keys, DB credentials, local dev flags)
+// live in config/local.php (gitignored, never committed) — copy
+// config/local.example.php to get started. Loaded FIRST, before any
+// define() below, so every setting in this file can be overridden by it via
+// the same `if (!defined(...))` guard every constant below uses. A real
+// environment variable works too and is checked as the next fallback.
+$localConfigFile = __DIR__ . '/local.php';
+if (is_file($localConfigFile)) {
+    require_once $localConfigFile;
+}
+
+// Database connection settings — PostgreSQL (Supabase). Get
+// HOST/PORT/USER/PASS from Supabase's Project Settings -> Database ->
+// Connection string -> "Session pooler" tab (see config/db.php for why not
+// "Transaction pooler").
+if (!defined('DB_HOST')) {
+    define('DB_HOST', getenv('DB_HOST') ?: '127.0.0.1');
+}
+if (!defined('DB_PORT')) {
+    define('DB_PORT', getenv('DB_PORT') ?: '5432');
+}
+if (!defined('DB_NAME')) {
+    define('DB_NAME', getenv('DB_NAME') ?: 'postgres');
+}
+if (!defined('DB_USER')) {
+    define('DB_USER', getenv('DB_USER') ?: 'postgres');
+}
+if (!defined('DB_PASS')) {
+    define('DB_PASS', getenv('DB_PASS') ?: '');
+}
 
 // Visitor identity cookie
 define('VISITOR_COOKIE_NAME', 'tree_visitor_id');
@@ -27,15 +51,10 @@ if (!defined('TRUST_PROXY')) {
 // Google Gemini AI translation — server-side only, never exposed to the
 // browser and never stored in the database. Feature auto-disables (falls
 // back to manual entry) when no key is configured, so nothing breaks in
-// environments without one.
-//
-// Put your real key in config/local.php (gitignored, never committed) —
-// copy config/local.example.php to get started. A real environment
-// variable (GEMINI_API_KEY) works too and is checked as a fallback.
-$localConfigFile = __DIR__ . '/local.php';
-if (is_file($localConfigFile)) {
-    require_once $localConfigFile;
-}
+// environments without one. Put your real key in config/local.php (loaded
+// at the top of this file) — copy config/local.example.php to get started.
+// A real environment variable (GEMINI_API_KEY) works too and is checked as
+// a fallback.
 
 // Base URL of the app, used for building QR target links (no trailing slash).
 // It gets baked into every QR PNG, so it must be the address visitors' phones

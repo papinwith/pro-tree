@@ -228,12 +228,16 @@ const LOGIN_GENERIC_ERROR = 'ชื่อผู้ใช้หรือรหั
  *
  * One SELECT does both the lock check and the credential fetch (not two
  * separate queries), and the failure path is a single atomic UPDATE rather
- * than a read-modify-write — MySQL evaluates a single-table UPDATE's SET
- * clauses left to right, so `locked_until` below sees failed_login_attempts'
- * own just-incremented value (not the pre-update one) without needing to
- * add 1 again itself. A read-then-write here would let concurrent guesses
- * race the counter and take far more than LOGIN_LOCKOUT_THRESHOLD tries to
- * actually lock.
+ * than a read-modify-write — a read-then-write here would let concurrent
+ * guesses race the counter and take far more than LOGIN_LOCKOUT_THRESHOLD
+ * tries to actually lock. The new failed_login_attempts value is computed
+ * with the same CASE expression in both SET clauses (rather than having
+ * `locked_until` reference the other clause's result) because — unlike
+ * MySQL, which evaluates a single-table UPDATE's SET clauses left to right
+ * so a later one can see an earlier one's just-written value — Postgres
+ * evaluates every SET expression against the pre-update row, so
+ * `locked_until` would otherwise check the OLD attempt count and lock the
+ * account one attempt later than intended.
  *
  * Returns null on success (session is set up); otherwise LOGIN_GENERIC_ERROR
  * for admin/login.php to show as-is.
@@ -274,12 +278,20 @@ function attemptAdminLogin(PDO $pdo, string $username, string $password): ?strin
     if ($admin) {
         $pdo->prepare(
             'UPDATE admins
-             SET failed_login_attempts = IF(:priorLockExpired, 1, failed_login_attempts + 1),
-                 locked_until = IF(failed_login_attempts >= :threshold,
-                                    DATE_ADD(NOW(), INTERVAL :minutes MINUTE), NULL)
+             SET failed_login_attempts = CASE WHEN :priorLockExpired = 1 THEN 1 ELSE failed_login_attempts + 1 END,
+                 locked_until = CASE
+                                     WHEN (CASE WHEN :priorLockExpired2 = 1 THEN 1 ELSE failed_login_attempts + 1 END) >= :threshold
+                                     THEN NOW() + (INTERVAL \'1 minute\' * :minutes)
+                                     ELSE NULL
+                                 END
              WHERE id = :id'
         )->execute([
             'priorLockExpired' => $priorLockExpired ? 1 : 0,
+            // Same value as priorLockExpired, bound under its own name rather
+            // than reused — PDO's native (non-emulated) prepare for pgsql
+            // doesn't reliably support one named placeholder appearing twice
+            // in the same query.
+            'priorLockExpired2' => $priorLockExpired ? 1 : 0,
             'threshold' => LOGIN_LOCKOUT_THRESHOLD,
             'minutes' => LOGIN_LOCKOUT_MINUTES,
             'id' => $admin['id'],

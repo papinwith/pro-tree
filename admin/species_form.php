@@ -396,11 +396,15 @@ $currentClassificationId = $species['classification_id'] ?? '';
     <label for="name_scientific">ชื่อวิทยาศาสตร์</label>
     <input type="text" id="name_scientific" name="name_scientific" value="<?= $v('name_scientific') ?>" placeholder="เช่น Cassia fistula">
 
-    <label for="image">รูปภาพชนิดพันธุ์</label>
+    <label>รูปภาพชนิดพันธุ์</label>
     <?php if (!empty($species['image_path'])): ?>
       <img src="../public/<?= e($species['image_path']) ?>" alt="" class="preview-thumb" id="image-preview">
     <?php endif; ?>
-    <input type="file" id="image" name="image" accept="image/jpeg,image/png,image/gif,image/webp" data-preview-target="image-preview">
+    <div class="field-row" data-photo-capture-for="image">
+      <button type="button" class="btn-outline btn-sm" data-photo-action="camera">📷 ถ่ายรูป</button>
+      <button type="button" class="btn-outline btn-sm" data-photo-action="gallery">🖼️ เลือกจากคลังภาพ</button>
+    </div>
+    <input type="file" id="image" name="image" accept="image/jpeg,image/png,image/gif,image/webp" data-preview-target="image-preview" hidden>
     <p class="field-hint">
       JPG / PNG / GIF / WEBP ขนาดไม่เกิน 5 MB — แสดงในรายการชนิดพันธุ์ และเป็นรูปสำรองบนหน้าต้นไม้ของผู้เข้าชม
       สำหรับต้นที่ยังไม่มีรูปของตัวเอง
@@ -713,5 +717,6 @@ $currentClassificationId = $species['classification_id'] ?? '';
 </div>
 <?php require __DIR__ . '/_confirm_modal.php'; ?>
 <script src="../public/assets/js/image-preview.js"></script>
+<script src="../public/assets/js/photo-capture-buttons.js"></script>
 </body>
 </html>

@@ -1,13 +1,14 @@
 # Plain PHP app (no framework) — this just gives it a PHP+Apache runtime
-# with the extensions it needs (pdo_mysql, gd for the vendored QR library),
-# for hosts that only support Docker deploys (e.g. Render) rather than
-# auto-detecting PHP directly (e.g. Railway, which needs no Dockerfile).
+# with the extensions it needs (pdo_pgsql for Supabase, gd for the vendored
+# QR library), for hosts that only support Docker deploys (e.g. Render)
+# rather than auto-detecting PHP directly (e.g. Railway, which needs no
+# Dockerfile).
 FROM php:8.2-apache
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        libpng-dev libjpeg62-turbo-dev libfreetype6-dev \
+        libpng-dev libjpeg62-turbo-dev libfreetype6-dev libpq-dev \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install -j"$(nproc)" gd pdo_mysql \
+    && docker-php-ext-install -j"$(nproc)" gd pdo_pgsql \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN a2enmod rewrite

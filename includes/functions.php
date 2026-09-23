@@ -130,7 +130,7 @@ function updateScanGps(PDO $pdo, int $scanId, int $visitorId, float $lat, float 
     $stmt = $pdo->prepare(
         "UPDATE tree_scans
          SET scan_lat = :lat, scan_lng = :lng, gps_accuracy_m = :acc, gps_available = 1
-         WHERE id = :id AND visitor_id = :vid AND scanned_at >= (NOW() - INTERVAL 10 MINUTE)"
+         WHERE id = :id AND visitor_id = :vid AND scanned_at >= (NOW() - INTERVAL '10 minutes')"
     );
     $stmt->execute([
         'lat' => $lat,
@@ -347,7 +347,7 @@ function recordSale(
         // rest of the on-hand count untouched.
         $remainingToDecrement = $quantity;
         $updateStmt = $pdo->prepare(
-            "UPDATE nursery_stock SET quantity = :qty, sale_status = IF(:qty2 <= 0, 'sold_out', sale_status) WHERE id = :id"
+            "UPDATE nursery_stock SET quantity = :qty, sale_status = CASE WHEN :qty2 <= 0 THEN 'sold_out' ELSE sale_status END WHERE id = :id"
         );
         foreach ($stockRows as $stockRow) {
             if ($remainingToDecrement <= 0) {
@@ -437,7 +437,7 @@ function speciesSaleStatus(PDO $pdo, int $speciesId): ?string
 {
     $stmt = $pdo->prepare(
         "SELECT sale_status FROM nursery_stock WHERE species_id = :sid AND sale_status != 'not_for_sale'
-         ORDER BY FIELD(sale_status, 'available','reserved','sold_out') LIMIT 1"
+         ORDER BY ARRAY_POSITION(ARRAY['available','reserved','sold_out'], sale_status) LIMIT 1"
     );
     $stmt->execute(['sid' => $speciesId]);
     $status = $stmt->fetchColumn();
@@ -747,7 +747,7 @@ function setSetting(PDO $pdo, string $key, string $value): void
 {
     $stmt = $pdo->prepare(
         'INSERT INTO settings (setting_key, setting_value) VALUES (:k, :v)
-         ON DUPLICATE KEY UPDATE setting_value = :v2'
+         ON CONFLICT (setting_key) DO UPDATE SET setting_value = :v2'
     );
     $stmt->execute(['k' => $key, 'v' => $value, 'v2' => $value]);
 }
@@ -1027,32 +1027,43 @@ function generateTreeQrCode(int $treeId): string
 }
 
 /**
- * Generates a full logical SQL backup of every table (structure + data) —
- * "มีฐานข้อมูลสำรอง" (proposal §9). Written against PDO directly (not
- * shelling out to mysqldump) so it works regardless of whether the mysql
- * client tools are on the web server's PATH. Streamed to the admin as a
- * downloadable .sql file by admin/backup.php.
+ * Generates a logical SQL backup of every table's DATA — "มีฐานข้อมูลสำรอง"
+ * (proposal §9). Written against PDO directly (not shelling out to
+ * pg_dump/mysqldump) so it works regardless of whether Postgres client tools
+ * are on the web server's PATH. Streamed to the admin as a downloadable
+ * .sql file by admin/backup.php.
+ *
+ * Data only, not structure — unlike the old MySQL version, Postgres has no
+ * SQL-level equivalent of `SHOW CREATE TABLE` to reconstruct full DDL
+ * (indexes, triggers, constraints) through PDO alone; reproducing that would
+ * mean re-implementing a chunk of pg_dump by hand. Restoring this backup
+ * means running docs/install.postgres.sql first for structure, then this
+ * file for data (see the header comment this function writes).
  */
 function generateDatabaseBackupSql(PDO $pdo): string
 {
-    $tables = $pdo->query('SHOW TABLES')->fetchAll(PDO::FETCH_COLUMN);
+    $tables = $pdo->query(
+        "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename"
+    )->fetchAll(PDO::FETCH_COLUMN);
 
-    $out = "-- tree_qr_system backup — generated " . date('Y-m-d H:i:s') . "\n";
-    $out .= "-- Restore with: mysql -u root -p tree_qr_system < this_file.sql\n\n";
-    $out .= "SET NAMES utf8mb4;\nSET FOREIGN_KEY_CHECKS=0;\n\n";
+    $out = "-- tree_qr_system data backup — generated " . date('Y-m-d H:i:s') . "\n";
+    $out .= "-- Data only (see generateDatabaseBackupSql() for why). Restore: run\n";
+    $out .= "-- docs/install.postgres.sql for structure first (fresh database only —\n";
+    $out .= "-- it seeds its own demo data too, so don't run it against a database\n";
+    $out .= "-- you're about to load this file into), then load this file, e.g.:\n";
+    $out .= "--   psql \"\$DATABASE_URL\" -f this_file.sql\n\n";
+    $out .= "SET session_replication_role = 'replica'; -- suspend FK checks while loading\n\n";
 
     foreach ($tables as $table) {
-        $createRow = $pdo->query('SHOW CREATE TABLE `' . $table . '`')->fetch();
-        $out .= "DROP TABLE IF EXISTS `$table`;\n" . $createRow['Create Table'] . ";\n\n";
-
-        $rows = $pdo->query('SELECT * FROM `' . $table . '`')->fetchAll(PDO::FETCH_ASSOC);
+        $rows = $pdo->query('SELECT * FROM "' . $table . '"')->fetchAll(PDO::FETCH_ASSOC);
         foreach ($rows as $row) {
             $columns = array_keys($row);
             $values = array_map(
                 fn($v) => $v === null ? 'NULL' : $pdo->quote((string) $v),
                 array_values($row)
             );
-            $out .= "INSERT INTO `$table` (`" . implode('`, `', $columns) . '`) VALUES ('
+            $quotedColumns = array_map(fn($c) => '"' . $c . '"', $columns);
+            $out .= 'INSERT INTO "' . $table . '" (' . implode(', ', $quotedColumns) . ') VALUES ('
                 . implode(', ', $values) . ");\n";
         }
         if ($rows) {
@@ -1060,6 +1071,6 @@ function generateDatabaseBackupSql(PDO $pdo): string
         }
     }
 
-    $out .= "SET FOREIGN_KEY_CHECKS=1;\n";
+    $out .= "SET session_replication_role = 'origin';\n";
     return $out;
 }

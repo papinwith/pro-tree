@@ -7,7 +7,7 @@ $speciesList = $pdo->query(
     'SELECT sp.*, st.name_th AS subtype_name, (SELECT COUNT(*) FROM trees t WHERE t.species_id = sp.id) AS tree_count,
             (SELECT COUNT(*) FROM planting_plans pp WHERE pp.species_id = sp.id) AS plan_count,
             (SELECT COUNT(*) FROM sale_transactions sl WHERE sl.species_id = sp.id) AS sale_count,
-            (SELECT GROUP_CONCAT(st2.name_th SEPARATOR ", ")
+            (SELECT STRING_AGG(st2.name_th, \', \')
              FROM species_subtypes ss JOIN subtypes st2 ON st2.id = ss.subtype_id
              WHERE ss.species_id = sp.id) AS extra_subtype_names
      FROM species sp LEFT JOIN subtypes st ON st.id = sp.subtype_id ORDER BY sp.name ASC'
