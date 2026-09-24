@@ -51,7 +51,7 @@ function httpRequest(string $url, ?string $cookieFile = null, ?array $post = nul
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HEADER => true,
         CURLOPT_FOLLOWLOCATION => false,
-        CURLOPT_TIMEOUT => 5,
+        CURLOPT_TIMEOUT => 20, // bumped from 5s: Supabase (remote Postgres) round-trips add real latency vs local MySQL
     ];
     if ($cookieFile !== null) {
         $opts[CURLOPT_COOKIEJAR] = $cookieFile;
@@ -151,10 +151,12 @@ try {
     // --- Log in as the seeded admin ---
     $cookieFile = tempnam(sys_get_temp_dir(), 'upload_cookies_');
     $tempFiles[] = $cookieFile;
-    httpRequest("$base/admin/login.php", $cookieFile);
+    $rLoginPage = httpRequest("$base/admin/login.php", $cookieFile);
+    preg_match('/name="csrf_token" value="([^"]+)"/', $rLoginPage['body'], $csrfMatch);
     $rLogin = httpRequest("$base/admin/login.php", $cookieFile, [
         'username' => 'admin',
         'password' => 'ChangeMe123!',
+        'csrf_token' => $csrfMatch[1] ?? '',
     ]);
     check('admin login succeeds', $rLogin['status'] === 302, "got {$rLogin['status']}");
 
@@ -182,6 +184,7 @@ try {
         'species_id' => (string) $speciesId,
         'zone_id' => (string) $zoneId,
         'is_active' => '1',
+        'csrf_token' => $csrfMatch[1] ?? '',
     ], [
         'image' => $treeImgPath,
         'map_image' => $mapImgPath,
@@ -227,6 +230,7 @@ try {
             'species_id' => (string) $speciesId,
             'zone_id' => (string) $zoneId,
             'is_active' => '1',
+            'csrf_token' => $csrfMatch[1] ?? '',
         ], [
             'image' => $newImgPath,
         ]);
@@ -250,6 +254,7 @@ try {
             'species_id' => (string) $speciesId,
             'zone_id' => (string) $zoneId,
             'is_active' => '1',
+            'csrf_token' => $csrfMatch[1] ?? '',
         ], [
             'image' => $fakePath,
         ]);
@@ -263,7 +268,10 @@ try {
         $mapToCheck = publicDir() . '/' . $treeAfterEdit['map_image_path'];
         $qrToCheck = publicDir() . '/' . $treeAfterEdit['qr_code_path'];
 
-        $rDelete = httpRequest("$base/admin/tree_delete.php", $cookieFile, ['id' => (string) $tree['id']]);
+        $rDelete = httpRequest("$base/admin/tree_delete.php", $cookieFile, [
+            'id' => (string) $tree['id'],
+            'csrf_token' => $csrfMatch[1] ?? '',
+        ]);
         check('delete redirects to dashboard', $rDelete['status'] === 302, "got {$rDelete['status']}");
 
         $stmt->execute(['id' => $newTreeId]);

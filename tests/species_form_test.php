@@ -151,7 +151,8 @@ $cleanup = function () use (&$serverProc, $pdo, &$testAdminId, &$tempFiles, $tri
     }
     $done = true;
     try {
-        $pdo->exec("DROP TRIGGER IF EXISTS $triggerName");
+        $pdo->exec("DROP TRIGGER IF EXISTS $triggerName ON nursery_stock");
+        $pdo->exec("DROP FUNCTION IF EXISTS {$triggerName}_fn()");
         $pdo->exec("DELETE FROM planting_plans WHERE zone_id IN (SELECT id FROM zones WHERE zone_code LIKE 'ZZTEST%')");
         $pdo->exec("DELETE FROM zones WHERE zone_code LIKE 'ZZTEST%'");
         // Everything this run created = species whose id wasn't there at the start.
@@ -344,8 +345,17 @@ try {
     check('rejections left no files behind', fileCount('assets/uploads/species') + fileCount('assets/uploads/tree') === $filesBefore);
 
     // --- 5. A failure mid-save rolls everything back ---
-    $pdo->exec("DROP TRIGGER IF EXISTS $triggerName");
-    $pdo->exec("CREATE TRIGGER $triggerName BEFORE INSERT ON nursery_stock FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'forced test failure'");
+    // Postgres has no inline trigger-body syntax (MySQL's `SIGNAL SQLSTATE`
+    // in a bare CREATE TRIGGER) — the trigger body has to be its own
+    // PL/pgSQL function, referenced by the trigger.
+    $pdo->exec("DROP TRIGGER IF EXISTS $triggerName ON nursery_stock");
+    $pdo->exec("DROP FUNCTION IF EXISTS {$triggerName}_fn()");
+    $pdo->exec("CREATE FUNCTION {$triggerName}_fn() RETURNS TRIGGER AS \$\$
+        BEGIN
+            RAISE EXCEPTION 'forced test failure';
+        END;
+        \$\$ LANGUAGE plpgsql");
+    $pdo->exec("CREATE TRIGGER $triggerName BEFORE INSERT ON nursery_stock FOR EACH ROW EXECUTE FUNCTION {$triggerName}_fn()");
     $countBefore = $speciesCount();
     $treesBefore = (int) $pdo->query('SELECT COUNT(*) FROM trees')->fetchColumn();
     $filesBefore = [
@@ -355,7 +365,8 @@ try {
         'plant_zone_id' => (string) $zoneId, 'plant_quantity' => '2', 'plant_status' => 'healthy',
         'stock_quantity' => '5', 'stock_price' => '100', 'stock_status' => 'available',
     ], ['image' => $speciesImg, 'tree_image' => $treeImg]);
-    $pdo->exec("DROP TRIGGER IF EXISTS $triggerName");
+    $pdo->exec("DROP TRIGGER IF EXISTS $triggerName ON nursery_stock");
+    $pdo->exec("DROP FUNCTION IF EXISTS {$triggerName}_fn()");
     // Status alone is unreliable here: in local dev PHP prints the uncaught
     // exception into a 200 response (production has display_errors off and
     // returns 500). What matters: it must not look like a successful save,

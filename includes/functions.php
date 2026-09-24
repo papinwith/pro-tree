@@ -465,7 +465,7 @@ function getCategoryByCode(PDO $pdo, string $code): ?array
  */
 function nextCategoryCode(PDO $pdo): string
 {
-    $max = (int) $pdo->query('SELECT MAX(CAST(code AS UNSIGNED)) FROM categories')->fetchColumn();
+    $max = (int) $pdo->query('SELECT MAX(CAST(code AS INTEGER)) FROM categories')->fetchColumn();
     return str_pad((string) ($max + 1), 3, '0', STR_PAD_LEFT);
 }
 
@@ -545,7 +545,7 @@ function getAllSpecies(PDO $pdo): array
  */
 function nextSpeciesCode(PDO $pdo, string $categoryCode): string
 {
-    $stmt = $pdo->prepare('SELECT MAX(CAST(species_code AS UNSIGNED)) FROM species WHERE category_code = :cc');
+    $stmt = $pdo->prepare('SELECT MAX(CAST(species_code AS INTEGER)) FROM species WHERE category_code = :cc');
     $stmt->execute(['cc' => $categoryCode]);
     $max = (int) $stmt->fetchColumn();
     return str_pad((string) ($max + 1), 3, '0', STR_PAD_LEFT);

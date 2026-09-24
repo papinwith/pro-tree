@@ -51,7 +51,7 @@ function httpRequest(string $url, ?string $cookieFile = null, ?array $post = nul
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HEADER => true,
         CURLOPT_FOLLOWLOCATION => false,
-        CURLOPT_TIMEOUT => 5,
+        CURLOPT_TIMEOUT => 20, // bumped from 5s: Supabase (remote Postgres) round-trips add real latency vs local MySQL
     ];
     if ($cookieFile !== null) {
         $opts[CURLOPT_COOKIEJAR] = $cookieFile;
@@ -216,10 +216,12 @@ try {
 
     // --- 2. Log in as the seeded admin ---
     $cookieFile = tempnam(sys_get_temp_dir(), 'qrtest_cookies_');
-    httpRequest("$base/admin/login.php", $cookieFile); // prime session cookie
+    $rLoginPage = httpRequest("$base/admin/login.php", $cookieFile); // prime session cookie + CSRF token
+    preg_match('/name="csrf_token" value="([^"]+)"/', $rLoginPage['body'], $csrfMatch);
     $rLogin = httpRequest("$base/admin/login.php", $cookieFile, [
         'username' => 'admin',
         'password' => 'ChangeMe123!',
+        'csrf_token' => $csrfMatch[1] ?? '',
     ]);
     check('admin login succeeds (redirect to dashboard)', $rLogin['status'] === 302, "got {$rLogin['status']}");
 
