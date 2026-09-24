@@ -1,0 +1,29 @@
+<VirtualHost *:__PORT__>
+	ServerAdmin webmaster@localhost
+	DocumentRoot /var/www/html
+
+	ErrorLog ${APACHE_LOG_DIR}/error.log
+	CustomLog ${APACHE_LOG_DIR}/access.log combined
+
+	# Railway (and any other TLS-terminating reverse proxy) forwards
+	# requests to this container as plain HTTP on its internal port.
+	# Apache's own automatic redirects -- e.g. mod_dir adding the missing
+	# trailing slash for a bare /admin or /public request -- normally
+	# build the Location header from Apache's OWN idea of scheme/host/port
+	# ("http://host:__PORT__/admin/"), which isn't reachable from outside
+	# the container. Neither `Header edit Location` (mod_headers doesn't
+	# rewrite it here) nor a relative RewriteRule target (mod_rewrite
+	# re-qualifies it back to an absolute http://host:port URL regardless)
+	# actually fixes this -- confirmed by testing both live against a
+	# running deployment. Handling just these two entry points explicitly,
+	# building the Location ourselves from the proxy's forwarded scheme
+	# and the original Host header, is what actually works.
+	DirectorySlash Off
+	RewriteEngine On
+	RewriteCond %{HTTP:X-Forwarded-Proto} =https
+	RewriteRule ^/admin$ https://%{HTTP_HOST}/admin/ [R=301,L]
+	RewriteCond %{HTTP:X-Forwarded-Proto} =https
+	RewriteRule ^/public$ https://%{HTTP_HOST}/public/ [R=301,L]
+	RewriteRule ^/admin$ http://%{HTTP_HOST}/admin/ [R=301,L]
+	RewriteRule ^/public$ http://%{HTTP_HOST}/public/ [R=301,L]
+</VirtualHost>

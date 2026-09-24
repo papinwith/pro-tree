@@ -6,7 +6,7 @@ set -e
 
 PORT="${PORT:-80}"
 sed -ri "s/Listen 80/Listen ${PORT}/" /etc/apache2/ports.conf
-sed -ri "s/:80>/:${PORT}>/" /etc/apache2/sites-available/000-default.conf
+sed -i "s/__PORT__/${PORT}/g" /etc/apache2/sites-available/000-default.conf
 
 # Force exactly one MPM (prefork, required by mod_php) at container start.
 # The Dockerfile already runs `a2dismod mpm_event mpm_worker && a2enmod
