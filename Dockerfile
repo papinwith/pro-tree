@@ -11,6 +11,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && docker-php-ext-install -j"$(nproc)" gd pdo_pgsql \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# The apt-get install above pulls in a newer apache2 package as a dependency,
+# which re-enables Debian's default mpm_event alongside the mpm_prefork that
+# the base php:8.2-apache image already switched to for mod_php (which isn't
+# thread-safe) — having both loaded is a fatal Apache config error
+# ("More than one MPM loaded") that prevented Apache from starting at all on
+# Railway, causing every single request (even static files) to 502.
+RUN (a2dismod mpm_event || true) && (a2dismod mpm_worker || true) && a2enmod mpm_prefork
+
 RUN a2enmod rewrite
 
 # Serve the whole repo (not just public/) so both /public/... (visitor
