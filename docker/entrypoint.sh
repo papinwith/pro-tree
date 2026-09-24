@@ -8,16 +8,20 @@ PORT="${PORT:-80}"
 sed -ri "s/Listen 80/Listen ${PORT}/" /etc/apache2/ports.conf
 sed -ri "s/:80>/:${PORT}>/" /etc/apache2/sites-available/000-default.conf
 
-# TEMPORARY diagnostic (2026-09-24): Apache is failing to start on Railway
-# with "More than one MPM loaded", even though the Dockerfile explicitly
-# disables mpm_event/mpm_worker and enables mpm_prefork at build time.
-# Dump the actual runtime module state to the deploy logs so this can be
-# debugged without a live shell (SSH isn't available while the container
-# keeps exiting). Remove this block once the real cause is found.
-echo "--- DEBUG: mods-enabled/*mpm* ---"
-ls -la /etc/apache2/mods-enabled/ | grep -i mpm || echo "(no mpm entries found)"
-echo "--- DEBUG: apache2ctl -M ---"
-apache2ctl -M 2>&1 || true
-echo "--- END DEBUG ---"
+# Force exactly one MPM (prefork, required by mod_php) at container start.
+# The Dockerfile already runs `a2dismod mpm_event mpm_worker && a2enmod
+# mpm_prefork` at BUILD time, but on Railway the final image still had
+# mpm_event.load/.conf enabled alongside mpm_prefork ("More than one MPM
+# loaded" — confirmed by dumping /etc/apache2/mods-enabled/ from a debug
+# build) — something in the apt-get layer re-enables Debian's default MPM
+# after our fix runs. Doing it here too, at every container start right
+# before Apache reads its config, is immune to whatever re-enables it
+# during the build.
+rm -f /etc/apache2/mods-enabled/mpm_event.load /etc/apache2/mods-enabled/mpm_event.conf
+rm -f /etc/apache2/mods-enabled/mpm_worker.load /etc/apache2/mods-enabled/mpm_worker.conf
+if [ ! -e /etc/apache2/mods-enabled/mpm_prefork.load ]; then
+    ln -s ../mods-available/mpm_prefork.load /etc/apache2/mods-enabled/mpm_prefork.load
+    ln -s ../mods-available/mpm_prefork.conf /etc/apache2/mods-enabled/mpm_prefork.conf
+fi
 
 exec "$@"
