@@ -8,7 +8,8 @@ require_once __DIR__ . '/../config/config.php';
  * POSTs $body (a generateContent request) to Gemini and returns the text of
  * the first candidate, or null on any failure (AI disabled, network error,
  * non-200, blocked/empty response). When it fails, $error is set to a short
- * human-readable reason (never contains the API key).
+ * human-readable reason that is safe to show an admin — it never contains the
+ * API key or the provider's own error text (that is written to error_log).
  */
 function geminiGenerateText(array $body, int $timeoutSeconds, ?string &$error = null): ?string
 {
@@ -56,8 +57,13 @@ function geminiGenerateText(array $body, int $timeoutSeconds, ?string &$error = 
         return null;
     }
     if ($status !== 200) {
+        // The provider's own message (quota/billing/project details) can be
+        // internal detail — it goes to the server log, never to the browser.
         $apiMessage = json_decode((string) $response, true)['error']['message'] ?? '';
-        $error = "บริการ AI ตอบกลับผิดพลาด (HTTP $status)" . ($apiMessage !== '' ? ": $apiMessage" : '');
+        error_log("Gemini API HTTP $status: " . $apiMessage);
+        $error = $status === 429
+            ? 'บริการ AI ถูกใช้งานเกินโควตาชั่วคราว กรุณารอสักครู่แล้วลองใหม่'
+            : "บริการ AI ตอบกลับผิดพลาด (HTTP $status) กรุณาลองใหม่อีกครั้ง";
         return null;
     }
 

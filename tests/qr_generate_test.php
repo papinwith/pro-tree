@@ -162,8 +162,7 @@ if (!$ready) {
 $createdTreeIds = [];
 $createdSpeciesId = null;
 
-register_shutdown_function(function () use (&$serverProc, $pdo, $testAdmin, &$createdTreeIds, &$createdSpeciesId) {
-    deleteTestAdmin($pdo, $testAdmin['username']);
+register_shutdown_function(function () use (&$serverProc, $pdo, &$createdTreeIds, &$createdSpeciesId) {
     if ($createdTreeIds) {
         $stmt = $pdo->prepare('SELECT qr_code_path FROM trees WHERE id = :id');
         foreach ($createdTreeIds as $tid) {

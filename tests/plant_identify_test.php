@@ -54,8 +54,10 @@ check('normalize: unknown confidence falls back to low', $n['confidence'] === 'l
 $n = normalizePlantIdentification(['is_plant' => true, 'name_th' => '', 'name_scientific' => '']);
 check('normalize: is_plant=true but no name at all is treated as not identified', $n['is_plant'] === false);
 
-$n = normalizePlantIdentification(['is_plant' => 'true', 'name_th' => 'x']);
-check('normalize: non-boolean is_plant is not trusted', $n['is_plant'] === false);
+foreach ([['true', true], [1, true], ['1', true], ['yes', true], ['banana', false], [0, false], ['false', false], [['x'], false], [null, false]] as [$claim, $expected]) {
+    $n = normalizePlantIdentification(['is_plant' => $claim, 'name_th' => 'x']);
+    check('normalize: is_plant=' . json_encode($claim) . ' -> ' . ($expected ? 'plant' : 'not a plant'), $n['is_plant'] === $expected);
+}
 
 $n = normalizePlantIdentification(['is_plant' => false, 'name_th' => 'ควรถูกทิ้ง', 'name_scientific' => 'X y', 'notes_th' => 'ไม่ใช่พืช', 'alternatives' => [['name_th' => 'z']]]);
 check('normalize: not-a-plant clears every suggestion but keeps the note',
@@ -83,6 +85,20 @@ if ($existing) {
     echo "SKIP  no species with a scientific name in the DB to test matching against\n";
 }
 check('findMatchingSpecies: unknown plant matches nothing', findMatchingSpecies($pdo, ['name_scientific' => 'Zzyzx nonexistens', 'name_th' => 'ไม่มีชื่อนี้แน่นอน']) === null);
+
+// consumeIdentifyQuota(): per-admin sliding window, explicit clock so no sleeping
+$quotaAdmin = 900000000 + random_int(1, 99999);
+$quotaFiles = [sys_get_temp_dir() . "/tree_ai_identify_$quotaAdmin.json", sys_get_temp_dir() . "/tree_ai_identify_" . ($quotaAdmin + 1) . ".json"];
+$t0 = 1_000_000;
+check('quota: first 3 calls under a limit of 3 are allowed',
+    consumeIdentifyQuota($quotaAdmin, 3, $t0) && consumeIdentifyQuota($quotaAdmin, 3, $t0 + 10) && consumeIdentifyQuota($quotaAdmin, 3, $t0 + 20));
+check('quota: the 4th within the hour is refused', consumeIdentifyQuota($quotaAdmin, 3, $t0 + 30) === false);
+check('quota: a refused call is not counted (still refused, and frees up on schedule)',
+    consumeIdentifyQuota($quotaAdmin, 3, $t0 + 3599) === false && consumeIdentifyQuota($quotaAdmin, 3, $t0 + 3601) === true);
+check('quota: it is per admin — another admin id is unaffected', consumeIdentifyQuota($quotaAdmin + 1, 3, $t0 + 30) === true);
+foreach ($quotaFiles as $qf) {
+    @unlink($qf);
+}
 
 // ------------------------------------------------------- endpoint over HTTP
 
@@ -153,26 +169,32 @@ $appProc = startServer(
     "$php -S $host:$appPort -t " . escapeshellarg(__DIR__ . '/..'),
     $host,
     $appPort,
-    ['GEMINI_API_KEY' => 'test-key-123', 'GEMINI_API_BASE' => "http://$host:$mockPort"]
+    // 6 identify calls/hour/admin: exactly the number of calls that reach the
+    // mock below, so the next one exercises the rate limit.
+    ['GEMINI_API_KEY' => 'test-key-123', 'GEMINI_API_BASE' => "http://$host:$mockPort", 'AI_IDENTIFY_MAX_PER_HOUR' => '6']
 );
-// Second app instance with NO API key, for the "AI not configured" path.
+// More app instances, each configured for one specific path:
+//  - no API key ("AI not configured")
+//  - a tiny upload_max_filesize (PHP rejects the file itself: UPLOAD_ERR_INI_SIZE)
+//  - a tiny post_max_size (PHP drops the whole body: empty $_POST/$_FILES)
 $noKeyPort = 8098;
-$noKeyProc = startServer("$php -S $host:$noKeyPort -t " . escapeshellarg(__DIR__ . '/..'), $host, $noKeyPort, ['GEMINI_API_KEY' => '']);
+$iniSizePort = 8100;
+$postSizePort = 8101;
+$docRoot = escapeshellarg(__DIR__ . '/..');
+$noKeyProc = startServer("$php -S $host:$noKeyPort -t $docRoot", $host, $noKeyPort, ['GEMINI_API_KEY' => '']);
+$iniSizeProc = startServer("$php -d upload_max_filesize=256 -S $host:$iniSizePort -t $docRoot", $host, $iniSizePort, ['GEMINI_API_KEY' => 'test-key-123', 'GEMINI_API_BASE' => "http://$host:$mockPort"]);
+$postSizeProc = startServer("$php -d post_max_size=200 -S $host:$postSizePort -t $docRoot", $host, $postSizePort, ['GEMINI_API_KEY' => 'test-key-123', 'GEMINI_API_BASE' => "http://$host:$mockPort"]);
 
-$testAdminUser = 'zz_test_identify_' . bin2hex(random_bytes(3));       // executive role: no tree/species permissions
-$testEditorUser = 'zz_test_identify_ed_' . bin2hex(random_bytes(3));   // programmer role: allowed
-$testAdminPass = 'T3st-' . bin2hex(random_bytes(6));
+// Throwaway admins (tests/_test_admin.php deletes them at exit, however the
+// script ends): an executive — no tree/species permissions — and a
+// programmer, who has them.
+require_once __DIR__ . '/_test_admin.php';
+$execAdmin = createTestAdmin($pdo, 2);
+$editorAdmin = createTestAdmin($pdo, 1);
 $cookieFiles = [];
 
-register_shutdown_function(function () use (&$appProc, &$mockProc, &$noKeyProc, $pdo, $testAdminUser, $testEditorUser, &$cookieFiles, $mockRouter, $mockResponseFile, $mockStatusFile, $mockLogFile) {
-    try {
-        $del = $pdo->prepare('DELETE FROM admins WHERE username = :u');
-        $del->execute(['u' => $testAdminUser]);
-        $del->execute(['u' => $testEditorUser]);
-    } catch (Throwable $e) {
-        echo "WARN  could not delete test admins: {$e->getMessage()}\n";
-    }
-    foreach ([$appProc, $mockProc, $noKeyProc] as $proc) {
+register_shutdown_function(function () use (&$appProc, &$mockProc, &$noKeyProc, &$iniSizeProc, &$postSizeProc, &$cookieFiles, $mockRouter, $mockResponseFile, $mockStatusFile, $mockLogFile) {
+    foreach ([$appProc, $mockProc, $noKeyProc, $iniSizeProc, $postSizeProc] as $proc) {
         if (is_resource($proc)) {
             proc_terminate($proc);
             proc_close($proc);
@@ -204,7 +226,10 @@ function request(string $url, string $cookieFile, ?array $post = null, bool $asM
     }
     $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
-    return ['status' => $status, 'json' => json_decode((string) $body, true), 'body' => (string) $body];
+    // PHP may print a startup warning (e.g. "POST Content-Length exceeds the limit")
+    // ahead of the JSON when display_errors is on, as it is for a localhost server.
+    $jsonStart = strpos((string) $body, '{"ok"');
+    return ['status' => $status, 'json' => json_decode($jsonStart === false ? (string) $body : substr((string) $body, $jsonStart), true), 'body' => (string) $body];
 }
 
 function login(string $base, string $user, string $pass, array &$cookieFiles): array
@@ -240,16 +265,12 @@ try {
     check('not logged in -> 401 JSON, not a login redirect', $r['status'] === 401 && ($r['json']['ok'] ?? null) === false, "got {$r['status']}: {$r['body']}");
 
     // executive role (2): a real admin account that lacks every tree/species permission
-    $pdo->prepare('INSERT INTO admins (username, password_hash, role_id) VALUES (:u, :p, 2)')
-        ->execute(['u' => $testAdminUser, 'p' => password_hash($testAdminPass, PASSWORD_DEFAULT)]);
-    $exec = login($app, $testAdminUser, $testAdminPass, $cookieFiles);
+    $exec = login($app, $execAdmin['username'], $execAdmin['password'], $cookieFiles);
     check('executive test admin can log in', $exec['ok']);
     $r = request($endpoint, $exec['cookie'], ['image' => new CURLFile($jpegPath, 'image/jpeg', 'p.jpg'), 'csrf_token' => $exec['csrf']], true);
     check('a role without species/tree permissions -> 403', $r['status'] === 403, "got {$r['status']}: {$r['body']}");
 
-    $pdo->prepare('INSERT INTO admins (username, password_hash, role_id) VALUES (:u, :p, 1)')
-        ->execute(['u' => $testEditorUser, 'p' => password_hash($testAdminPass, PASSWORD_DEFAULT)]);
-    $admin = login($app, $testEditorUser, $testAdminPass, $cookieFiles);
+    $admin = login($app, $editorAdmin['username'], $editorAdmin['password'], $cookieFiles);
     check('an admin with tree/species permissions can log in', $admin['ok']);
 
     $photo = fn() => new CURLFile($jpegPath, 'image/jpeg', 'photo.jpg');
@@ -261,10 +282,22 @@ try {
     check('no photo -> 400', $r['status'] === 400 && str_contains($r['json']['error'] ?? '', 'รูป'), "got {$r['status']}: {$r['body']}");
     $r = request($endpoint, $admin['cookie'], ['image' => new CURLFile($notImagePath, 'image/jpeg', 'fake.jpg'), 'csrf_token' => $admin['csrf']], true);
     check('a non-image file (even if named .jpg) -> 400', $r['status'] === 400, "got {$r['status']}: {$r['body']}");
+
+    // PHP-level upload limits must give a specific "too large" answer, not
+    // "pick a photo" (file rejected by upload_max_filesize) or "CSRF expired"
+    // (whole body dropped by post_max_size).
+    $iniAdmin = login("http://$host:$iniSizePort", $editorAdmin['username'], $editorAdmin['password'], $cookieFiles);
+    $r = request("http://$host:$iniSizePort/admin/identify_tree.php", $iniAdmin['cookie'], ['image' => $photo(), 'csrf_token' => $iniAdmin['csrf']], true);
+    check('a file over PHP upload_max_filesize -> 400 "too large", not "pick a photo"',
+        $r['status'] === 400 && str_contains($r['json']['error'] ?? '', 'ใหญ่เกินไป'), "got {$r['status']}: {$r['body']}");
+    $postAdmin = login("http://$host:$postSizePort", $editorAdmin['username'], $editorAdmin['password'], $cookieFiles);
+    $r = request("http://$host:$postSizePort/admin/identify_tree.php", $postAdmin['cookie'], ['image' => $photo(), 'csrf_token' => $postAdmin['csrf']], true);
+    check('a request over PHP post_max_size -> 413 "too large", not a CSRF error',
+        $r['status'] === 413 && str_contains($r['json']['error'] ?? '', 'ใหญ่เกินไป'), "got {$r['status']}: {$r['body']}");
     check('none of the rejected requests reached the (mock) Gemini API', !is_file($mockLogFile));
 
     // --- AI not configured ---
-    $noKeyAdmin = login("http://$host:$noKeyPort", $testEditorUser, $testAdminPass, $cookieFiles);
+    $noKeyAdmin = login("http://$host:$noKeyPort", $editorAdmin['username'], $editorAdmin['password'], $cookieFiles);
     if ($noKeyAdmin['ok']) {
         $r = request("http://$host:$noKeyPort/admin/identify_tree.php", $noKeyAdmin['cookie'], ['image' => $photo(), 'csrf_token' => $noKeyAdmin['csrf']], true);
         // Only meaningful when the machine's config/local.php has no key either.
@@ -325,10 +358,22 @@ try {
 
     file_put_contents($mockStatusFile, '500');
     $r = request($endpoint, $admin['cookie'], ['image' => $photo(), 'csrf_token' => $admin['csrf']], true);
-    check('Gemini returning HTTP 500 -> 502 that includes the upstream reason',
-        $r['status'] === 502 && str_contains($r['json']['error'] ?? '', '500') && str_contains($r['json']['error'] ?? '', 'mock failure'), "got {$r['status']}: {$r['body']}");
+    check('Gemini returning HTTP 500 -> 502 naming the status code',
+        $r['status'] === 502 && str_contains($r['json']['error'] ?? '', '500'), "got {$r['status']}: {$r['body']}");
+    check("the provider's own error text is NOT passed on to the browser", !str_contains($r['body'], 'mock failure'), $r['body']);
     check('the API key never appears in an error response', !str_contains($r['body'], 'test-key-123'));
+
+    file_put_contents($mockStatusFile, '429');
+    $r = request($endpoint, $admin['cookie'], ['image' => $photo(), 'csrf_token' => $admin['csrf']], true);
+    check('Gemini quota exhausted (429) -> 502 with a plain "quota" message, no provider text',
+        $r['status'] === 502 && str_contains($r['json']['error'] ?? '', 'โควตา') && !str_contains($r['body'], 'mock failure'), "got {$r['status']}: {$r['body']}");
     file_put_contents($mockStatusFile, '200');
+
+    // Six calls have now reached the mock (limit is 6/hour): the seventh is
+    // refused locally, before it can cost anything.
+    @unlink($mockLogFile);
+    $r = request($endpoint, $admin['cookie'], ['image' => $photo(), 'csrf_token' => $admin['csrf']], true);
+    check('over the hourly quota -> 429 and Gemini is not called', $r['status'] === 429 && !is_file($mockLogFile), "got {$r['status']}: {$r['body']}");
 
     // the two forms actually expose the button + script
     foreach (['species_form.php', 'tree_form.php'] as $formPage) {

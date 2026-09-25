@@ -788,15 +788,22 @@ function resolveAssetUrl(string $value, string $base): string
 }
 
 /**
- * Validates and moves an uploaded image into public/assets/uploads/{subdir}/,
- * using a random filename (never the client-supplied one). Returns the path
- * relative to public/ (e.g. "assets/uploads/tree/64f...b2.jpg"), or null if
- * no file was submitted for this field. Throws on an invalid/oversized file.
+ * Checks a $_FILES entry that should be an image: upload succeeded, within
+ * the 5 MB limit, and really a JPG/PNG/GIF/WEBP by its actual content (not
+ * its name or client-declared type). Returns ['ext' => 'jpg', 'mime' =>
+ * 'image/jpeg'], or null if no file was submitted for this field. Throws
+ * RuntimeException with a Thai message otherwise. Shared by every upload
+ * path so the rules can't drift apart.
  */
-function saveUploadedImage(array $file, string $subdir): ?string
+function inspectUploadedImage(array $file): ?array
 {
     if (!isset($file['error']) || $file['error'] === UPLOAD_ERR_NO_FILE) {
         return null;
+    }
+    if ($file['error'] === UPLOAD_ERR_INI_SIZE || $file['error'] === UPLOAD_ERR_FORM_SIZE) {
+        // PHP's own upload_max_filesize (2 MB by default) tripped before our
+        // 5 MB check below could — same problem from the admin's side.
+        throw new RuntimeException('ไฟล์รูปภาพมีขนาดใหญ่เกินไป (สูงสุด 5 MB)');
     }
     if ($file['error'] !== UPLOAD_ERR_OK) {
         throw new RuntimeException('อัปโหลดล้มเหลว (รหัสข้อผิดพลาด ' . $file['error'] . ')');
@@ -813,15 +820,30 @@ function saveUploadedImage(array $file, string $subdir): ?string
     }
 
     $allowedTypes = [
-        IMAGETYPE_JPEG => 'jpg',
-        IMAGETYPE_PNG => 'png',
-        IMAGETYPE_GIF => 'gif',
-        IMAGETYPE_WEBP => 'webp',
+        IMAGETYPE_JPEG => ['ext' => 'jpg', 'mime' => 'image/jpeg'],
+        IMAGETYPE_PNG => ['ext' => 'png', 'mime' => 'image/png'],
+        IMAGETYPE_GIF => ['ext' => 'gif', 'mime' => 'image/gif'],
+        IMAGETYPE_WEBP => ['ext' => 'webp', 'mime' => 'image/webp'],
     ];
-    $ext = $allowedTypes[$imageInfo[2]] ?? null;
-    if ($ext === null) {
+    if (!isset($allowedTypes[$imageInfo[2]])) {
         throw new RuntimeException('ไม่รองรับชนิดไฟล์นี้ กรุณาใช้ JPG, PNG, GIF หรือ WEBP');
     }
+    return $allowedTypes[$imageInfo[2]];
+}
+
+/**
+ * Validates and moves an uploaded image into public/assets/uploads/{subdir}/,
+ * using a random filename (never the client-supplied one). Returns the path
+ * relative to public/ (e.g. "assets/uploads/tree/64f...b2.jpg"), or null if
+ * no file was submitted for this field. Throws on an invalid/oversized file.
+ */
+function saveUploadedImage(array $file, string $subdir): ?string
+{
+    $type = inspectUploadedImage($file);
+    if ($type === null) {
+        return null;
+    }
+    $ext = $type['ext'];
 
     $destDir = publicDir() . '/assets/uploads/' . $subdir;
     if (!is_dir($destDir) && !mkdir($destDir, 0755, true) && !is_dir($destDir)) {

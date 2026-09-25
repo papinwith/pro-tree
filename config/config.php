@@ -78,6 +78,12 @@ if (!defined('GEMINI_API_BASE')) {
 }
 define('AI_ENABLED', GEMINI_API_KEY !== '');
 
+// Max "identify this tree from a photo" calls per admin per hour — each one is
+// a paid Gemini call, so this stops a stuck/abused button from burning quota.
+if (!defined('AI_IDENTIFY_MAX_PER_HOUR')) {
+    define('AI_IDENTIFY_MAX_PER_HOUR', max(1, (int) (getenv('AI_IDENTIFY_MAX_PER_HOUR') ?: 30)));
+}
+
 // Forces the Gemini API call onto IPv4 — a workaround for hosts/networks
 // where outbound IPv6 to generativelanguage.googleapis.com is misconfigured
 // or blackholed (curl hangs the full timeout trying IPv6 first otherwise).

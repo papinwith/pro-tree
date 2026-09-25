@@ -28,6 +28,11 @@ if (!adminLoggedIn()) {
 if (!can('species.manage') && !can('tree.create') && !can('tree.update')) {
     identifyJson(403, ['ok' => false, 'error' => 'บทบาทของคุณไม่มีสิทธิ์ใช้งานส่วนนี้']);
 }
+// A body over post_max_size makes PHP drop $_POST and $_FILES entirely, which
+// would otherwise surface as a misleading "CSRF expired" below.
+if (empty($_POST) && empty($_FILES) && (int) ($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) {
+    identifyJson(413, ['ok' => false, 'error' => 'ไฟล์รูปภาพมีขนาดใหญ่เกินไป (สูงสุด 5 MB)']);
+}
 $submittedToken = $_POST['csrf_token'] ?? '';
 if (!is_string($submittedToken) || empty($_SESSION['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $submittedToken)) {
     identifyJson(400, ['ok' => false, 'error' => 'คำขอไม่ถูกต้องหรือหมดอายุ กรุณารีเฟรชหน้าแล้วลองใหม่']);
@@ -36,17 +41,19 @@ if (!AI_ENABLED) {
     identifyJson(503, ['ok' => false, 'error' => 'ยังไม่ได้ตั้งค่า Gemini API key — ดูวิธีตั้งค่าที่หน้า "ตั้งค่า"']);
 }
 
-$file = $_FILES['image'] ?? null;
-if (!$file || ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+try {
+    $imageType = inspectUploadedImage($_FILES['image'] ?? []);
+} catch (RuntimeException $e) {
+    identifyJson(400, ['ok' => false, 'error' => $e->getMessage()]);
+}
+if ($imageType === null) {
     identifyJson(400, ['ok' => false, 'error' => 'กรุณาเลือกหรือถ่ายรูปต้นไม้ก่อน']);
 }
-if ($file['size'] > 5 * 1024 * 1024) {
-    identifyJson(400, ['ok' => false, 'error' => 'ไฟล์รูปภาพมีขนาดใหญ่เกินไป (สูงสุด 5 MB)']);
-}
-$imageInfo = @getimagesize($file['tmp_name']);
-$allowedMimes = [IMAGETYPE_JPEG => 'image/jpeg', IMAGETYPE_PNG => 'image/png', IMAGETYPE_GIF => 'image/gif', IMAGETYPE_WEBP => 'image/webp'];
-if ($imageInfo === false || !isset($allowedMimes[$imageInfo[2]])) {
-    identifyJson(400, ['ok' => false, 'error' => 'ไฟล์นี้ไม่ใช่รูปภาพที่รองรับ (JPG, PNG, GIF, WEBP)']);
+
+// Only requests that would actually cost a Gemini call count against the
+// quota (everything rejected above is free).
+if (!consumeIdentifyQuota((int) $_SESSION['admin_id'])) {
+    identifyJson(429, ['ok' => false, 'error' => 'ใช้ฟีเจอร์ระบุชนิดด้วย AI ครบโควตาต่อชั่วโมงแล้ว (' . AI_IDENTIFY_MAX_PER_HOUR . ' ครั้ง) กรุณารอสักครู่แล้วลองใหม่']);
 }
 
 // Release the session lock before the slow (up to 60s) Gemini call —
@@ -54,7 +61,7 @@ if ($imageInfo === false || !isset($allowedMimes[$imageInfo[2]])) {
 // tab, saving the form) queues behind it.
 session_write_close();
 
-$outcome = identifyPlantFromImage((string) file_get_contents($file['tmp_name']), $allowedMimes[$imageInfo[2]]);
+$outcome = identifyPlantFromImage((string) file_get_contents($_FILES['image']['tmp_name']), $imageType['mime']);
 if (!$outcome['ok']) {
     identifyJson(502, ['ok' => false, 'error' => $outcome['error']]);
 }

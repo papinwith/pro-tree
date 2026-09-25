@@ -37,7 +37,11 @@
         var canvas = document.createElement('canvas');
         canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
         canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
-        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        var ctx = canvas.getContext('2d');
+        // JPEG has no alpha: without this, transparent PNG/WebP/GIF areas turn black.
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         canvas.toBlob(function (out) { resolve(out || blob); }, 'image/jpeg', 0.85);
       };
       img.onerror = function () {

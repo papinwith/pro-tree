@@ -40,8 +40,11 @@ function normalizePlantIdentification(array $raw): array
 
     $nameTh = $str($raw['name_th'] ?? null, 120);
     $nameScientific = $str($raw['name_scientific'] ?? null, 160);
-    // Nothing usable to suggest, whatever `is_plant` claims.
-    $isPlant = ($raw['is_plant'] ?? false) === true && ($nameTh !== '' || $nameScientific !== '');
+    // Nothing usable to suggest, whatever `is_plant` claims. The model
+    // sometimes answers "true"/1 instead of a JSON boolean, so accept those
+    // too (an unrecognized value, e.g. "banana" or an array, counts as false).
+    $claimsPlant = is_scalar($raw['is_plant'] ?? null) && filter_var($raw['is_plant'], FILTER_VALIDATE_BOOLEAN);
+    $isPlant = $claimsPlant && ($nameTh !== '' || $nameScientific !== '');
 
     return [
         'is_plant' => $isPlant,
@@ -124,4 +127,46 @@ function findMatchingSpecies(PDO $pdo, array $identification): ?array
         }
     }
     return $byName;
+}
+
+/**
+ * Per-admin hourly quota for the paid identify call (AI_IDENTIFY_MAX_PER_HOUR).
+ * Counts one use and returns true if the admin is still under the limit, or
+ * returns false (without counting) if they've used it up. State is a small
+ * timestamp list in the system temp dir, flock()ed so concurrent requests
+ * can't both slip under the limit — no schema change needed. It's per
+ * server instance and resets if the host wipes its temp dir (fine: it only
+ * guards against a stuck or abused button, not a hard billing guarantee).
+ * If the file can't be opened at all it fails OPEN, so a broken temp dir
+ * doesn't take the whole feature down.
+ */
+function consumeIdentifyQuota(int $adminId, ?int $maxPerHour = null, ?int $now = null): bool
+{
+    $max = $maxPerHour ?? AI_IDENTIFY_MAX_PER_HOUR;
+    $now = $now ?? time();
+    $windowStart = $now - 3600;
+
+    $handle = @fopen(sys_get_temp_dir() . '/tree_ai_identify_' . $adminId . '.json', 'c+');
+    if (!$handle) {
+        return true;
+    }
+    try {
+        flock($handle, LOCK_EX);
+        $stored = json_decode((string) stream_get_contents($handle), true);
+        $recent = array_values(array_filter(
+            is_array($stored) ? $stored : [],
+            static fn($t) => is_int($t) && $t > $windowStart
+        ));
+        if (count($recent) >= $max) {
+            return false;
+        }
+        $recent[] = $now;
+        ftruncate($handle, 0);
+        rewind($handle);
+        fwrite($handle, json_encode($recent));
+        return true;
+    } finally {
+        flock($handle, LOCK_UN);
+        fclose($handle);
+    }
 }

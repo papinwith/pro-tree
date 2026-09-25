@@ -121,8 +121,7 @@ if (!$ready) {
 
 $createdTreeIds = [];
 
-register_shutdown_function(function () use (&$serverProc, $pdo, $testAdmin, &$createdTreeIds) {
-    deleteTestAdmin($pdo, $testAdmin['username']);
+register_shutdown_function(function () use (&$serverProc, $pdo, &$createdTreeIds) {
     if ($createdTreeIds) {
         $stmt = $pdo->prepare('SELECT image_path, map_image_path, qr_code_path FROM trees WHERE id = :id');
         foreach ($createdTreeIds as $tid) {
