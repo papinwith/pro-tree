@@ -100,3 +100,30 @@ a free-tier limit of 0.
   text; always read the drafted text before saving.
 - A single photo is often not enough (a leaf-only or bark-only shot). Taking a
   photo that shows flower/leaf/fruit clearly matters more than any setting here.
+
+## Hard time cap (5 seconds)
+
+The identify request is cut off at `AI_IDENTIFY_MAX_SECONDS` (default **5**,
+minimum 2), measured from the moment the request starts — the script's own
+work and any fallback models all come out of that one budget. If the AI hasn't
+answered in time the admin gets HTTP 504 and "AI ตอบช้าเกินเวลาที่กำหนด …
+กรุณาลองใหม่" (`timed_out: true`) instead of waiting. The button also shows a
+live seconds counter.
+
+What it took to make 5 s realistic when the database is remote (each query
+~0.3 s, connecting ~0.8 s from a machine ~170 ms away):
+
+- **No database access on the click.** Opening the species/tree form hands the
+  endpoint what it already loaded: the category/subtype/species lists go to a
+  small cache file (`AI_IDENTIFY_CACHE_SECONDS`, default 600) and the admin is
+  marked "just verified" in their own server-side session for ~2 minutes
+  (`warmIdentifyRequest()` in `includes/plant_identify.php`). A session that
+  never opened the form is checked against the database (`canAny()`, one
+  query). *Trade-off:* a role revoked within those ~2 minutes still works for
+  this one endpoint until the marker lapses.
+- Smaller upload (1024 px, JPEG 0.82) and no sleeping between fallback models.
+
+Measured end to end through the real endpoint with the real API, from a
+machine with a slow link to both Google and the database (form opened first),
+5 photos x brief/full: **10/10 answered, 1.9-3.7 s** (median ~3 s). Before
+these changes the same run timed out on 4 of 10 requests with a 5 s cap.

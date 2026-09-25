@@ -165,13 +165,15 @@ function buildPlantIdentifyPrompt(?array $catalogue = null): string
 
 /**
  * Sends the photo to Gemini. Returns ['ok' => true, 'result' => <normalized>]
- * or ['ok' => false, 'error' => <Thai message>]. Pass $catalogue (see
- * buildPlantIdentifyPrompt()) for the full write-up; the category/subtype it
- * picks are then validated against that same catalogue.
+ * or ['ok' => false, 'error' => <Thai message>, 'timed_out' => bool]. Pass
+ * $catalogue (see buildPlantIdentifyPrompt()) for the full write-up; the
+ * category/subtype it picks are then validated against that same catalogue.
+ * $budgetSeconds is a hard cap on the whole AI call (see geminiGenerateText()).
  */
-function identifyPlantFromImage(string $imageBytes, string $mimeType, ?array $catalogue = null): array
+function identifyPlantFromImage(string $imageBytes, string $mimeType, ?array $catalogue = null, float $budgetSeconds = 60.0): array
 {
     $error = null;
+    $timedOut = false;
     $innerText = geminiGenerateText([
         'contents' => [[
             'parts' => [
@@ -180,10 +182,10 @@ function identifyPlantFromImage(string $imageBytes, string $mimeType, ?array $ca
             ],
         ]],
         'generationConfig' => ['response_mime_type' => 'application/json'],
-    ], $catalogue !== null ? 90 : 60, $error);
+    ], $budgetSeconds, $error, $timedOut);
 
     if ($innerText === null) {
-        return ['ok' => false, 'error' => $error ?? 'เรียกใช้บริการ AI ไม่สำเร็จ'];
+        return ['ok' => false, 'error' => $error ?? 'เรียกใช้บริการ AI ไม่สำเร็จ', 'timed_out' => $timedOut];
     }
 
     $raw = json_decode($innerText, true);
@@ -208,15 +210,16 @@ function scientificNameKey(string $name): string
  * Finds an already-catalogued species matching an identification — by
  * scientific name (genus + species, so author/cultivar suffixes don't
  * matter), falling back to an exact Thai-name match. Returns that species
- * row (id, name, ...) or null.
+ * row (id, name, ...) or null. Pass $speciesRows (e.g. from
+ * cachedIdentifyLists()) to skip the database read.
  */
-function findMatchingSpecies(PDO $pdo, array $identification): ?array
+function findMatchingSpecies(?PDO $pdo, array $identification, ?array $speciesRows = null): ?array
 {
     $sciKey = scientificNameKey((string) ($identification['name_scientific'] ?? ''));
     $nameTh = trim((string) ($identification['name_th'] ?? ''));
 
     $byName = null;
-    foreach (getAllSpecies($pdo) as $species) {
+    foreach ($speciesRows ?? getAllSpecies($pdo ?? db()) as $species) {
         if ($sciKey !== '' && scientificNameKey((string) ($species['name_scientific'] ?? '')) === $sciKey) {
             return $species;
         }
@@ -267,4 +270,88 @@ function consumeIdentifyQuota(int $adminId, ?int $maxPerHour = null, ?int $now =
         flock($handle, LOCK_UN);
         fclose($handle);
     }
+}
+
+/**
+ * Returns $load()'s result, reusing a copy kept in the system temp dir for up
+ * to $ttlSeconds. For data that changes rarely but costs a slow remote query
+ * to read (categories, subtypes, the species list) on a request with a tight
+ * time budget. Stale by at most $ttlSeconds; the callers only use it to steer
+ * and cross-check the AI's answer, and everything derived from it is
+ * re-validated by the form/server, so brief staleness is harmless. A cache
+ * that can't be read or written silently falls back to $load().
+ */
+function identifyCached(string $name, int $ttlSeconds, callable $load): array
+{
+    if ($ttlSeconds <= 0) {
+        return $load();
+    }
+    $path = sys_get_temp_dir() . '/tree_ai_cache_' . preg_replace('/[^a-z0-9_]/i', '', $name) . '.json';
+    clearstatcache(true, $path); // a long-lived process (or a test) must not see a stale mtime
+    if (is_file($path) && time() - (int) @filemtime($path) < $ttlSeconds) {
+        $cached = json_decode((string) @file_get_contents($path), true);
+        if (is_array($cached)) {
+            return $cached;
+        }
+    }
+    $fresh = $load();
+    $tmp = $path . '.' . bin2hex(random_bytes(4)) . '.tmp';
+    if (@file_put_contents($tmp, json_encode($fresh)) !== false) {
+        @rename($tmp, $path);
+        @unlink($tmp);
+    }
+    return $fresh;
+}
+
+/**
+ * The identify endpoint has only a few seconds in total, and every database
+ * round trip costs ~0.3 s (plus ~0.8 s to connect) when the database is
+ * remote — so the forms that offer the button hand it what they have already
+ * loaded to render: the category/subtype/species lists (into the list cache)
+ * and a short-lived "this admin was just verified" marker in their own
+ * server-side session, so the click itself needs no database access at all.
+ * Call it only from a page that has already passed its permission check;
+ * $canManageSpecies says whether that check was species.manage (which is what
+ * the full write-up needs) or only a tree permission.
+ */
+function warmIdentifyRequest(bool $canManageSpecies, ?array $categories, ?array $subtypes, ?array $species): void
+{
+    $ttl = AI_IDENTIFY_CACHE_SECONDS;
+    if ($ttl <= 0) {
+        return;
+    }
+    $until = time() + min($ttl, 120);
+    $_SESSION['identify_permitted_until'] = $until;
+    $_SESSION['identify_species_until'] = $canManageSpecies ? $until : 0;
+    if ($categories !== null) {
+        identifyRefresh('categories', $categories);
+    }
+    if ($subtypes !== null) {
+        identifyRefresh('subtypes', $subtypes);
+    }
+    if ($species !== null) {
+        identifyRefresh('species', array_map(
+            static fn($s) => ['id' => $s['id'], 'name' => $s['name'], 'name_scientific' => $s['name_scientific'] ?? null],
+            $species
+        ));
+    }
+}
+
+/** Overwrites the cache entry that identifyCached() reads for $name. */
+function identifyRefresh(string $name, array $data): void
+{
+    $path = sys_get_temp_dir() . '/tree_ai_cache_' . preg_replace('/[^a-z0-9_]/i', '', $name) . '.json';
+    $tmp = $path . '.' . bin2hex(random_bytes(4)) . '.tmp';
+    if (@file_put_contents($tmp, json_encode($data)) !== false) {
+        @rename($tmp, $path);
+        @unlink($tmp);
+    }
+}
+
+/** Seconds since the list cache for $name was written, or null if there is none. */
+function identifyCacheAge(string $name): ?int
+{
+    $path = sys_get_temp_dir() . '/tree_ai_cache_' . preg_replace('/[^a-z0-9_]/i', '', $name) . '.json';
+    clearstatcache(true, $path);
+    return is_file($path) ? max(0, time() - (int) @filemtime($path)) : null;
 }

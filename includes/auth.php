@@ -107,6 +107,27 @@ function can(string $permissionKey): bool
 }
 
 /**
+ * True if the current admin holds ANY of the given permissions — one query,
+ * where calling can() once per key costs a database round trip each (slow
+ * when the database is remote and the caller is on a tight time budget).
+ */
+function canAny(array $permissionKeys): bool
+{
+    if (empty($_SESSION['admin_role_id']) || !$permissionKeys) {
+        return false;
+    }
+    $placeholders = implode(',', array_fill(0, count($permissionKeys), '?'));
+    $stmt = db()->prepare(
+        "SELECT 1 FROM role_permissions rp
+         JOIN permissions p ON p.id = rp.permission_id
+         WHERE rp.role_id = ? AND p.permission_key IN ($placeholders)
+         LIMIT 1"
+    );
+    $stmt->execute(array_merge([$_SESSION['admin_role_id']], array_values($permissionKeys)));
+    return (bool) $stmt->fetchColumn();
+}
+
+/**
  * Gates a page/action to a specific permission (e.g.
  * requirePermission('tree.create')). Must be the first check in any
  * admin/*.php or api/*.php script that touches protected data — frontend

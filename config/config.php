@@ -94,6 +94,23 @@ if (!defined('GEMINI_API_BASE')) {
 }
 define('AI_ENABLED', GEMINI_API_KEY !== '');
 
+// Hard cap, in seconds, on how long one "identify this tree from a photo" request
+// may take end to end (checked from the moment the request starts, fallback
+// models included). If the AI hasn't answered by then the admin gets a clear
+// "too slow, try again" instead of waiting. Typical answers take ~3-4 s.
+if (!defined('AI_IDENTIFY_MAX_SECONDS')) {
+    define('AI_IDENTIFY_MAX_SECONDS', max(2.0, (float) (getenv('AI_IDENTIFY_MAX_SECONDS') ?: 5)));
+}
+
+// How long (seconds) the category/subtype/species lists the identify request
+// needs are reused from a small cache file instead of re-read from the database.
+// Each database query costs ~0.3 s when the database is remote, and the whole
+// request has only AI_IDENTIFY_MAX_SECONDS. 0 turns the cache off.
+if (!defined('AI_IDENTIFY_CACHE_SECONDS')) {
+    $cacheEnv = getenv('AI_IDENTIFY_CACHE_SECONDS');
+    define('AI_IDENTIFY_CACHE_SECONDS', $cacheEnv === false ? 600 : max(0, (int) $cacheEnv));
+}
+
 // Max "identify this tree from a photo" calls per admin per hour — each one is
 // a paid Gemini call, so this stops a stuck/abused button from burning quota.
 if (!defined('AI_IDENTIFY_MAX_PER_HOUR')) {

@@ -22,7 +22,9 @@
 // The photo comes from the file input if one is chosen, else from the image
 // the input's data-preview-target points at (the already-saved photo).
 (function () {
-  var MAX_SIDE = 1280; // plenty for identification; keeps the upload small
+  var MAX_SIDE = 1024; // plenty for identification; a smaller upload is faster, and the server allows the AI only a few seconds in total
+  var SERVER_LIMIT_SECONDS = 5; // mirrors AI_IDENTIFY_MAX_SECONDS (config/config.php), for the on-screen counter only
+  var NETWORK_GIVE_UP_MS = 15000; // safety net if the connection itself hangs; the server enforces the real limit
 
   // Long-form fields the AI drafts when the form asks for the full write-up
   // (data-detail="full"), shown in this order.
@@ -56,7 +58,7 @@
         ctx.fillStyle = '#fff';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        canvas.toBlob(function (out) { resolve(out || blob); }, 'image/jpeg', 0.85);
+        canvas.toBlob(function (out) { resolve(out || blob); }, 'image/jpeg', 0.82);
       };
       img.onerror = function () {
         URL.revokeObjectURL(url);
@@ -185,7 +187,16 @@
       if (!tokenField) { showMessage('ไม่พบรหัสความปลอดภัยของฟอร์ม กรุณารีเฟรชหน้า', true); return; }
 
       button.disabled = true;
-      showMessage('กำลังให้ AI ดูรูป… (ปกติไม่กี่วินาที)', false);
+      // Live counter so it's clear something is happening and how long it can take.
+      var startedAt = Date.now();
+      function tick() {
+        var s = Math.floor((Date.now() - startedAt) / 1000);
+        showMessage('กำลังให้ AI ดูรูป… ' + s + ' วินาที (ไม่เกิน ' + SERVER_LIMIT_SECONDS + ' วินาที)', false);
+      }
+      tick();
+      var timer = setInterval(tick, 500);
+      var abort = new AbortController();
+      var giveUp = setTimeout(function () { abort.abort(); }, NETWORK_GIVE_UP_MS);
 
       sourceBlob()
         .then(downscale)
@@ -194,7 +205,7 @@
           data.append('csrf_token', tokenField.value);
           data.append('image', blob, 'photo.jpg');
           if (wrapper.dataset.detail === 'full') data.append('detail', 'full');
-          return fetch(wrapper.dataset.endpoint, { method: 'POST', body: data, credentials: 'same-origin' });
+          return fetch(wrapper.dataset.endpoint, { method: 'POST', body: data, credentials: 'same-origin', signal: abort.signal });
         })
         .then(function (response) {
           return response.json().catch(function () { return { ok: false, error: 'ได้รับการตอบกลับที่อ่านไม่ได้ (HTTP ' + response.status + ')' }; });
@@ -204,9 +215,13 @@
           else showMessage(payload.error || 'ระบุชนิดไม่สำเร็จ', true);
         })
         .catch(function (err) {
-          showMessage((err && err.message) || 'ระบุชนิดไม่สำเร็จ กรุณาลองใหม่', true);
+          showMessage(err && err.name === 'AbortError' ? 'เชื่อมต่อเซิร์ฟเวอร์ช้าเกินไป กรุณาลองใหม่อีกครั้ง' : ((err && err.message) || 'ระบุชนิดไม่สำเร็จ กรุณาลองใหม่'), true);
         })
-        .then(refreshButton);
+        .then(function () {
+          clearInterval(timer);
+          clearTimeout(giveUp);
+          refreshButton();
+        });
     });
   });
 })();

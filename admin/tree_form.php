@@ -23,6 +23,10 @@ $speciesList = getAllSpecies($pdo);
 $categoriesByCode = array_column(getAllCategories($pdo), null, 'code');
 $subtypes = getAllSubtypes($pdo);
 $subtypesById = array_column($subtypes, null, 'id');
+require_once __DIR__ . '/../includes/plant_identify.php';
+// Hand the AI-identify button what this page just loaded (see warmIdentifyRequest()).
+// This form only needs the tree permissions, so no species-write-up rights are implied.
+warmIdentifyRequest(false, null, null, $speciesList);
 $zones = getAllZones($pdo);
 $mapImage = getSetting($pdo, 'default_map_image', '');
 $mapImageUrl = $mapImage ? resolveAssetUrl($mapImage, '../public') : '';

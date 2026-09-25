@@ -14,6 +14,11 @@ if ($id && !$species) {
 $errors = [];
 $categories = getAllCategories($pdo);
 $subtypes = getAllSubtypes($pdo);
+require_once __DIR__ . '/../includes/plant_identify.php';
+// Hand the AI-identify button what this page just loaded (see warmIdentifyRequest()).
+// The species list (only used to flag "already in the system") is a slower, rarely
+// changing read, so it is refreshed only when the cached copy is getting old.
+warmIdentifyRequest(true, $categories, $subtypes, AI_IDENTIFY_CACHE_SECONDS > 0 && (identifyCacheAge('species') ?? PHP_INT_MAX) > AI_IDENTIFY_CACHE_SECONDS / 2 ? getAllSpecies($pdo) : null);
 $zones = getAllZones($pdo);
 $stockRows = $id ? getStockForSpecies($pdo, $id) : [];
 $stockSizes = getAllStockSizes($pdo);
@@ -410,7 +415,7 @@ $currentClassificationId = $species['classification_id'] ?? '';
       <?php if (!AI_ENABLED): ?>
         <p class="field-hint">ต้องตั้งค่า Gemini API key ก่อนจึงจะใช้ได้ — ดูที่หน้า <a href="settings.php#ai-translation">ตั้งค่า</a></p>
       <?php else: ?>
-        <p class="field-hint">ไม่รู้ว่าเป็นต้นอะไร? ถ่ายรูปหรือเลือกรูป แล้วให้ AI เดาชื่อพร้อมร่างข้อมูลทั้งหมดให้ (วิธีดูแล ลักษณะ คุณสมบัติ ประโยชน์ ข้อควรระวัง ประเภท/ชนิด) ปกติใช้เวลาไม่กี่วินาที และตรวจสอบก่อนบันทึกเสมอ</p>
+        <p class="field-hint">ไม่รู้ว่าเป็นต้นอะไร? ถ่ายรูปหรือเลือกรูป แล้วให้ AI เดาชื่อพร้อมร่างข้อมูลทั้งหมดให้ (วิธีดูแล ลักษณะ คุณสมบัติ ประโยชน์ ข้อควรระวัง ประเภท/ชนิด) ใช้เวลาไม่เกิน 5 วินาที และตรวจสอบก่อนบันทึกเสมอ</p>
       <?php endif; ?>
       <div data-ai-output aria-live="polite"></div>
     </div>

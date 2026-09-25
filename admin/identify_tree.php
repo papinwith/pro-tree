@@ -24,10 +24,18 @@ if (!adminLoggedIn()) {
     identifyJson(401, ['ok' => false, 'error' => 'กรุณาเข้าสู่ระบบใหม่']);
 }
 // Same people who can add/edit a species or a tree — the two forms this
-// button lives on.
-$canManageSpecies = can('species.manage');
-if (!$canManageSpecies && !can('tree.create') && !can('tree.update')) {
-    identifyJson(403, ['ok' => false, 'error' => 'บทบาทของคุณไม่มีสิทธิ์ใช้งานส่วนนี้']);
+// button lives on. Those forms mark the admin as just-verified for a couple of
+// minutes (warmIdentifyRequest()), which saves the database round trips here;
+// once that lapses the permission is checked against the database again.
+$now = time();
+$speciesOk = ($_SESSION['identify_species_until'] ?? 0) >= $now;
+if (($_SESSION['identify_permitted_until'] ?? 0) < $now) {
+    if (!canAny(['species.manage', 'tree.create', 'tree.update'])) {
+        identifyJson(403, ['ok' => false, 'error' => 'บทบาทของคุณไม่มีสิทธิ์ใช้งานส่วนนี้']);
+    }
+    $speciesOk = can('species.manage');
+    $_SESSION['identify_permitted_until'] = $now + 60;
+    $_SESSION['identify_species_until'] = $speciesOk ? $now + 60 : 0;
 }
 // A body over post_max_size makes PHP drop $_POST and $_FILES entirely, which
 // would otherwise surface as a misleading "CSRF expired" below.
@@ -66,19 +74,27 @@ session_write_close();
 // plus a category/subtype picked from the real lists) — only for someone who
 // can actually create/edit species; the tree form just wants the name.
 $catalogue = null;
-if (($_POST['detail'] ?? '') === 'full' && $canManageSpecies) {
-    $catalogue = ['categories' => getAllCategories(db()), 'subtypes' => getAllSubtypes(db())];
+if (($_POST['detail'] ?? '') === 'full' && $speciesOk) {
+    $catalogue = [
+        'categories' => identifyCached('categories', AI_IDENTIFY_CACHE_SECONDS, fn() => getAllCategories(db())),
+        'subtypes' => identifyCached('subtypes', AI_IDENTIFY_CACHE_SECONDS, fn() => getAllSubtypes(db())),
+    ];
 }
 
-// The full write-up is a much longer answer; the API call alone can take up to 90s.
-set_time_limit(120);
-$outcome = identifyPlantFromImage((string) file_get_contents($_FILES['image']['tmp_name']), $imageType['mime'], $catalogue);
+// Hard cap: the whole request (this script's own work included, measured from
+// when it started) must finish within AI_IDENTIFY_MAX_SECONDS. What's left after
+// what has already been spent — minus a little for matching the answer against
+// the catalogue afterwards — is the AI's budget, fallback models included.
+$budget = max(1.5, AI_IDENTIFY_MAX_SECONDS - (microtime(true) - ($_SERVER['REQUEST_TIME_FLOAT'] ?? microtime(true))) - 0.4);
+$outcome = identifyPlantFromImage((string) file_get_contents($_FILES['image']['tmp_name']), $imageType['mime'], $catalogue, $budget);
 if (!$outcome['ok']) {
-    identifyJson(502, ['ok' => false, 'error' => $outcome['error']]);
+    identifyJson(!empty($outcome['timed_out']) ? 504 : 502, ['ok' => false, 'timed_out' => !empty($outcome['timed_out']), 'error' => $outcome['error']]);
 }
 
 $result = $outcome['result'];
-$matched = $result['is_plant'] ? findMatchingSpecies(db(), $result) : null;
+$matched = $result['is_plant']
+    ? findMatchingSpecies(null, $result, identifyCached('species', AI_IDENTIFY_CACHE_SECONDS, fn() => db()->query('SELECT id, name, name_scientific FROM species ORDER BY name')->fetchAll()))
+    : null;
 $result['matched_species_id'] = $matched ? (int) $matched['id'] : null;
 $result['matched_species_name'] = $matched ? (string) $matched['name'] : null;
 identifyJson(200, ['ok' => true, 'result' => $result]);

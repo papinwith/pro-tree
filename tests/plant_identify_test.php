@@ -126,6 +126,24 @@ foreach ($quotaFiles as $qf) {
     @unlink($qf);
 }
 
+// identifyCached(): reuses a result for the TTL, TTL 0 always reloads
+$cacheName = 'unittest' . random_int(1000, 999999);
+$cacheFile = sys_get_temp_dir() . '/tree_ai_cache_' . $cacheName . '.json';
+$loads = 0;
+$loader = function () use (&$loads) {
+    $loads++;
+    return [['id' => 1, 'name' => 'ก']];
+};
+identifyCached($cacheName, 60, $loader);
+$second = identifyCached($cacheName, 60, $loader);
+check('identifyCached: a second call within the TTL reuses the cache (loader ran once) and returns the same data', $loads === 1 && $second === [['id' => 1, 'name' => 'ก']]);
+touch($cacheFile, time() - 500);
+identifyCached($cacheName, 60, $loader);
+check('identifyCached: an entry older than the TTL is reloaded', $loads === 2);
+identifyCached($cacheName, 0, $loader);
+check('identifyCached: TTL 0 disables caching', $loads === 3);
+@unlink($cacheFile);
+
 // ------------------------------------------------------- endpoint over HTTP
 
 if (!function_exists('imagecreatetruecolor')) {
@@ -144,6 +162,8 @@ $mockStatusFile = "$tmp/mock_gemini_status.txt";
 $mockLogFile = "$tmp/mock_gemini_request.json";
 $mockRouter = "$tmp/mock_gemini_router.php";
 $mockFailFile = "$tmp/mock_gemini_fail_models.txt";
+$mockDelayFile = "$tmp/mock_gemini_delay.txt";
+@unlink($mockDelayFile);
 $mockPathsFile = "$tmp/mock_gemini_paths.log";
 @unlink($mockFailFile);
 @unlink($mockPathsFile);
@@ -160,6 +180,10 @@ file_put_contents("$dir/mock_gemini_request.json", json_encode([
     'body' => json_decode(file_get_contents('php://input'), true),
 ]));
 file_put_contents("$dir/mock_gemini_paths.log", parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) . "\n", FILE_APPEND);
+$delay = (float) (@file_get_contents("$dir/mock_gemini_delay.txt") ?: 0);
+if ($delay > 0) {
+    usleep((int) ($delay * 1000000));
+}
 $status = (int) (@file_get_contents("$dir/mock_gemini_status.txt") ?: 200);
 // models listed here (comma-separated) answer 429 regardless of the status file
 foreach (array_filter(explode(',', (string) @file_get_contents("$dir/mock_gemini_fail_models.txt"))) as $failModel) {
@@ -209,11 +233,13 @@ $appProc = startServer(
     "$php -S $host:$appPort -t " . escapeshellarg(__DIR__ . '/..'),
     $host,
     $appPort,
-    // 11 identify calls/hour/admin: exactly the number of calls that reach the
+    // 12 identify calls/hour/admin: exactly the number of calls that reach the
     // mock below, so the next one exercises the rate limit. Two models (a, then
     // b as its fallback) so the model chain can be tested.
-    ['GEMINI_API_KEY' => 'test-key-123', 'GEMINI_API_BASE' => "http://$host:$mockPort", 'AI_IDENTIFY_MAX_PER_HOUR' => '11',
-     'GEMINI_MODEL' => 'mock-model-a', 'GEMINI_FALLBACK_MODELS' => 'mock-model-b']
+    ['GEMINI_API_KEY' => 'test-key-123', 'GEMINI_API_BASE' => "http://$host:$mockPort", 'AI_IDENTIFY_MAX_PER_HOUR' => '12',
+     'GEMINI_MODEL' => 'mock-model-a', 'GEMINI_FALLBACK_MODELS' => 'mock-model-b',
+     // 3 s total for the whole request (the minimum), and no list cache so the DB-derived checks stay deterministic
+     'AI_IDENTIFY_MAX_SECONDS' => '3', 'AI_IDENTIFY_CACHE_SECONDS' => '0']
 );
 // More app instances, each configured for one specific path:
 //  - no API key ("AI not configured")
@@ -225,6 +251,8 @@ $postSizePort = 8101;
 $docRoot = escapeshellarg(__DIR__ . '/..');
 $noKeyProc = startServer("$php -S $host:$noKeyPort -t $docRoot", $host, $noKeyPort, ['GEMINI_API_KEY' => '']);
 $iniSizeProc = startServer("$php -d upload_max_filesize=256 -S $host:$iniSizePort -t $docRoot", $host, $iniSizePort, ['GEMINI_API_KEY' => 'test-key-123', 'GEMINI_API_BASE' => "http://$host:$mockPort"]);
+$warmPort = 8102;
+$warmProc = startServer("$php -S $host:$warmPort -t $docRoot", $host, $warmPort, ['GEMINI_API_KEY' => 'test-key-123', 'GEMINI_API_BASE' => "http://$host:$mockPort", 'AI_IDENTIFY_CACHE_SECONDS' => '600', 'GEMINI_MODEL' => 'mock-model-a', 'GEMINI_FALLBACK_MODELS' => '']);
 $postSizeProc = startServer("$php -d post_max_size=200 -S $host:$postSizePort -t $docRoot", $host, $postSizePort, ['GEMINI_API_KEY' => 'test-key-123', 'GEMINI_API_BASE' => "http://$host:$mockPort"]);
 
 // Throwaway admins (tests/_test_admin.php deletes them at exit, however the
@@ -233,16 +261,17 @@ $postSizeProc = startServer("$php -d post_max_size=200 -S $host:$postSizePort -t
 require_once __DIR__ . '/_test_admin.php';
 $execAdmin = createTestAdmin($pdo, 2);
 $editorAdmin = createTestAdmin($pdo, 1);
+$warmAdmin = createTestAdmin($pdo, 1);
 $cookieFiles = [];
 
-register_shutdown_function(function () use (&$appProc, &$mockProc, &$noKeyProc, &$iniSizeProc, &$postSizeProc, &$cookieFiles, $mockRouter, $mockResponseFile, $mockStatusFile, $mockLogFile, $mockFailFile, $mockPathsFile) {
-    foreach ([$appProc, $mockProc, $noKeyProc, $iniSizeProc, $postSizeProc] as $proc) {
+register_shutdown_function(function () use (&$appProc, &$mockProc, &$noKeyProc, &$iniSizeProc, &$postSizeProc, &$warmProc, &$cookieFiles, $mockRouter, $mockResponseFile, $mockStatusFile, $mockLogFile, $mockFailFile, $mockPathsFile, $mockDelayFile) {
+    foreach ([$appProc, $mockProc, $noKeyProc, $iniSizeProc, $postSizeProc, $warmProc] as $proc) {
         if (is_resource($proc)) {
             proc_terminate($proc);
             proc_close($proc);
         }
     }
-    foreach (array_merge($cookieFiles, [$mockRouter, $mockResponseFile, $mockStatusFile, $mockLogFile, $mockFailFile, $mockPathsFile]) as $f) {
+    foreach (array_merge($cookieFiles, [$mockRouter, $mockResponseFile, $mockStatusFile, $mockLogFile, $mockFailFile, $mockPathsFile, $mockDelayFile]) as $f) {
         @unlink($f);
     }
 });
@@ -463,8 +492,8 @@ try {
     @unlink($mockPathsFile);
     $r = request($endpoint, $admin['cookie'], ['image' => $photo(), 'csrf_token' => $admin['csrf']], true);
     $tried = array_map($modelOf, $pathsNow());
-    check('every model overloaded (503) -> both models tried, then one more pass after a pause, then a clean 502',
-        $r['status'] === 502 && $tried === ['mock-model-a', 'mock-model-b', 'mock-model-a', 'mock-model-b'] && str_contains($r['json']['error'] ?? '', '503'), "got {$r['status']} tried " . implode(',', $tried) . ": {$r['body']}");
+    check('every model overloaded (503) -> each model tried once, straight away (no pause: the request has a hard time cap), then a clean 502',
+        $r['status'] === 502 && $tried === ['mock-model-a', 'mock-model-b'] && str_contains($r['json']['error'] ?? '', '503'), "got {$r['status']} tried " . implode(',', $tried) . ": {$r['body']}");
 
     file_put_contents($mockStatusFile, '400');
     @unlink($mockPathsFile);
@@ -472,6 +501,17 @@ try {
     $tried = array_map($modelOf, $pathsNow());
     check('a request error (400) would fail on every model, so it is not retried on another', $r['status'] === 502 && $tried === ['mock-model-a'], "tried " . implode(',', $tried));
     file_put_contents($mockStatusFile, '200');
+    // --- hard time cap: a slow AI must not hold the request past AI_IDENTIFY_MAX_SECONDS (3 here) ---
+    file_put_contents($mockDelayFile, '5');
+    $t0 = microtime(true);
+    $r = request($endpoint, $admin['cookie'], ['image' => $photo(), 'csrf_token' => $admin['csrf']], true);
+    $elapsed = microtime(true) - $t0;
+    check('an AI that answers in 5 s is cut off: 504 with a "too slow, try again" message, flagged timed_out',
+        $r['status'] === 504 && ($r['json']['timed_out'] ?? false) === true && str_contains($r['json']['error'] ?? '', 'ช้าเกิน'), "got {$r['status']}: {$r['body']}");
+    check('...and the whole request returned within the cap (3 s + a little), not after the AI\'s 5 s', $elapsed < 4.2, round($elapsed, 1) . 's');
+    unlink($mockDelayFile);
+    sleep(3); // the single-threaded mock is still finishing the abandoned 5 s request
+
     // failure modes -> a clean JSON error, never a PHP error
     file_put_contents($mockResponseFile, 'this is not json at all');
     $r = request($endpoint, $admin['cookie'], ['image' => $photo(), 'csrf_token' => $admin['csrf']], true);
@@ -490,11 +530,28 @@ try {
         $r['status'] === 502 && str_contains($r['json']['error'] ?? '', 'โควตา') && !str_contains($r['body'], 'mock failure'), "got {$r['status']}: {$r['body']}");
     file_put_contents($mockStatusFile, '200');
 
-    // Eleven calls have now reached the mock (limit is 11/hour): the seventh is
+    // Twelve calls have now reached the mock (limit is 12/hour): the seventh is
     // refused locally, before it can cost anything.
     @unlink($mockLogFile);
     $r = request($endpoint, $admin['cookie'], ['image' => $photo(), 'csrf_token' => $admin['csrf']], true);
     check('over the hourly quota -> 429 and Gemini is not called', $r['status'] === 429 && !is_file($mockLogFile), "got {$r['status']}: {$r['body']}");
+
+    // --- "warm" path: opening the form pre-loads what the click needs, so the click makes no database round trips ---
+    file_put_contents($mockResponseFile, json_encode(['is_plant' => true, 'name_th' => 'ต้นทดสอบ', 'name_scientific' => 'Warmus testus', 'confidence' => 'high'], JSON_UNESCAPED_UNICODE));
+    $warm = login("http://$host:$warmPort", $warmAdmin['username'], $warmAdmin['password'], $cookieFiles);
+    $warmEndpoint = "http://$host:$warmPort/admin/identify_tree.php";
+    request("http://$host:$warmPort/admin/species_form.php", $warm['cookie']); // opening the form is what warms it
+    check('opening the species form writes the category/subtype/species lists to the cache',
+        identifyCacheAge('categories') !== null && identifyCacheAge('subtypes') !== null && identifyCacheAge('species') !== null);
+    // Take the role away in the database. A request that had to consult the database would now be refused;
+    // one served from the just-verified marker is not (that short window is the documented trade-off).
+    $pdo->prepare('UPDATE admins SET role_id = 2 WHERE username = :u')->execute(['u' => $warmAdmin['username']]);
+    $r = request($warmEndpoint, $warm['cookie'], ['image' => $photo(), 'csrf_token' => $warm['csrf'], 'detail' => 'full'], true);
+    check('after the form was opened, the click is served with no permission lookup (verified marker, session-side)', $r['status'] === 200 && ($r['json']['ok'] ?? false) === true, "got {$r['status']}: {$r['body']}");
+    $cold = login("http://$host:$warmPort", $warmAdmin['username'], $warmAdmin['password'], $cookieFiles);
+    $r = request($warmEndpoint, $cold['cookie'], ['image' => $photo(), 'csrf_token' => $cold['csrf']], true);
+    check('a session that never opened the form is checked against the database, so the revoked role is refused (403)', $r['status'] === 403, "got {$r['status']}");
+    $pdo->prepare('UPDATE admins SET role_id = 1 WHERE username = :u')->execute(['u' => $warmAdmin['username']]);
 
     // the two forms actually expose the button + script
     foreach (['species_form.php', 'tree_form.php'] as $formPage) {
