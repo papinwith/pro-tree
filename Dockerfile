@@ -37,6 +37,8 @@ RUN { \
     } > /etc/apache2/conf-available/allow-override.conf \
     && a2enconf allow-override
 
+COPY docker/php-app.ini /usr/local/etc/php/conf.d/zz-app.ini
+
 # Replaces the base image's default vhost with our own template (see the
 # file itself for why: Railway/any TLS-terminating proxy forwards plain
 # HTTP internally, and Apache's own auto-redirects otherwise leak the
