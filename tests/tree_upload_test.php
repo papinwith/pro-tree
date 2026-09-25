@@ -28,6 +28,8 @@ $port = 8096;
 $base = "http://$host:$port";
 
 $pdo = db();
+require_once __DIR__ . '/_test_admin.php';
+$testAdmin = createTestAdmin($pdo);
 
 $pass = 0;
 $fail = 0;
@@ -126,7 +128,8 @@ if (!$ready) {
 $createdTreeId = null;
 $tempFiles = [];
 
-register_shutdown_function(function () use (&$serverProc, $pdo, &$createdTreeId, &$tempFiles) {
+register_shutdown_function(function () use (&$serverProc, $pdo, $testAdmin, &$createdTreeId, &$tempFiles) {
+    deleteTestAdmin($pdo, $testAdmin['username']);
     if ($createdTreeId) {
         $stmt = $pdo->prepare('SELECT image_path, map_image_path, qr_code_path FROM trees WHERE id = :id');
         $stmt->execute(['id' => $createdTreeId]);
@@ -154,8 +157,8 @@ try {
     $rLoginPage = httpRequest("$base/admin/login.php", $cookieFile);
     preg_match('/name="csrf_token" value="([^"]+)"/', $rLoginPage['body'], $csrfMatch);
     $rLogin = httpRequest("$base/admin/login.php", $cookieFile, [
-        'username' => 'admin',
-        'password' => 'ChangeMe123!',
+        'username' => $testAdmin['username'],
+        'password' => $testAdmin['password'],
         'csrf_token' => $csrfMatch[1] ?? '',
     ]);
     check('admin login succeeds', $rLogin['status'] === 302, "got {$rLogin['status']}");

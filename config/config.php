@@ -70,6 +70,12 @@ if (!defined('GEMINI_API_KEY')) {
 if (!defined('GEMINI_MODEL')) {
     define('GEMINI_MODEL', getenv('GEMINI_MODEL') ?: 'gemini-3.6-flash');
 }
+// Base URL of the Gemini API — only ever overridden by the tests, which point
+// it at a local mock server so the AI features can be exercised end to end
+// without a real key or network access.
+if (!defined('GEMINI_API_BASE')) {
+    define('GEMINI_API_BASE', rtrim(getenv('GEMINI_API_BASE') ?: 'https://generativelanguage.googleapis.com', '/'));
+}
 define('AI_ENABLED', GEMINI_API_KEY !== '');
 
 // Forces the Gemini API call onto IPv4 — a workaround for hosts/networks

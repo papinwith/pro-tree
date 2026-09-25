@@ -405,6 +405,15 @@ $currentClassificationId = $species['classification_id'] ?? '';
       <button type="button" class="btn-outline btn-sm" data-photo-action="gallery">🖼️ เลือกจากคลังภาพ</button>
     </div>
     <input type="file" id="image" name="image" accept="image/jpeg,image/png,image/gif,image/webp" data-preview-target="image-preview" hidden>
+    <div data-ai-identify-for="image" data-endpoint="identify_tree.php" data-apply-label="ใช้ชื่อนี้กรอกลงฟอร์ม"<?= AI_ENABLED ? '' : ' data-ai-unavailable="1"' ?>>
+      <button type="button" class="btn-outline btn-sm" data-ai-action="identify" disabled>🔍 ให้ AI ช่วยระบุชนิดต้นไม้จากรูปนี้</button>
+      <?php if (!AI_ENABLED): ?>
+        <p class="field-hint">ต้องตั้งค่า Gemini API key ก่อนจึงจะใช้ได้ — ดูที่หน้า <a href="settings.php#ai-translation">ตั้งค่า</a></p>
+      <?php else: ?>
+        <p class="field-hint">ไม่รู้ว่าเป็นต้นอะไร? ถ่ายรูปหรือเลือกรูป แล้วให้ AI เดาชื่อให้ (ตรวจสอบก่อนบันทึกเสมอ)</p>
+      <?php endif; ?>
+      <div data-ai-output aria-live="polite"></div>
+    </div>
     <p class="field-hint">
       JPG / PNG / GIF / WEBP ขนาดไม่เกิน 5 MB — แสดงในรายการชนิดพันธุ์ และเป็นรูปสำรองบนหน้าต้นไม้ของผู้เข้าชม
       สำหรับต้นที่ยังไม่มีรูปของตัวเอง
@@ -718,5 +727,26 @@ $currentClassificationId = $species['classification_id'] ?? '';
 <?php require __DIR__ . '/_confirm_modal.php'; ?>
 <script src="../public/assets/js/image-preview.js"></script>
 <script src="../public/assets/js/photo-capture-buttons.js"></script>
+<script src="../public/assets/js/ai-identify-button.js"></script>
+<script>
+// "ใช้ชื่อนี้กรอกลงฟอร์ม" from the AI-identify panel: fills the name fields
+// (overwriting — the admin just asked for this), but only fills the
+// description if it's still empty so typed-in text is never clobbered.
+var aiIdentify = document.querySelector('[data-ai-identify-for="image"]'); // absent when the form is hidden (no subtypes yet)
+if (aiIdentify) aiIdentify.addEventListener('ai-identify:apply', function (e) {
+  var r = e.detail.result;
+  function setValue(id, value, onlyIfEmpty) {
+    var field = document.getElementById(id);
+    if (!field || !value) return;
+    if (onlyIfEmpty && field.value.trim() !== '') return;
+    field.value = value;
+  }
+  setValue('name', r.name_th || r.name_common, false);
+  setValue('name_common', r.name_common, false);
+  setValue('name_scientific', r.name_scientific, false);
+  setValue('description', r.description_th, true);
+  document.getElementById('name').focus();
+});
+</script>
 </body>
 </html>

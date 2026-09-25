@@ -125,7 +125,7 @@ $openingHours = $errors ? ($openingHours ?? '') : getSetting($pdo, 'opening_hour
   <p class="field-hint">ต้นไม้แต่ละต้นสามารถกำหนดค่าเฉพาะของตัวเองแทนค่านี้ได้ในแบบฟอร์มแก้ไขต้นไม้ — ข้อมูลติดต่อ/เวลาทำการด้านบนจะแสดงในหน้าต้นไม้ที่ลูกค้าเห็นตอนสแกน QR</p>
 
   <section id="ai-translation" class="history-section">
-    <h2>คำแปลด้วย AI (Gemini)</h2>
+    <h2>AI (Gemini) — คำแปล และระบุชนิดต้นไม้จากรูป</h2>
     <?php if (AI_ENABLED): ?>
       <div class="flash">✓ ตั้งค่า Gemini API key แล้ว — ใช้โมเดล <code><?= e(GEMINI_MODEL) ?></code></div>
     <?php else: ?>
@@ -139,6 +139,7 @@ $openingHours = $errors ? ($openingHours ?? '') : getSetting($pdo, 'opening_hour
       <li>เปิด <code>config/local.php</code> แล้วแทนที่ <code>paste-your-gemini-api-key-here</code> ด้วยคีย์จริง</li>
       <li>บันทึกไฟล์ — ไม่ต้องรีสตาร์ท Apache ก็ใช้ได้ทันที</li>
     </ol>
+    <p class="field-hint">คีย์เดียวกันนี้ใช้กับปุ่ม "ให้ AI ช่วยระบุชนิดต้นไม้จากรูป" ในหน้าเพิ่ม/แก้ไขชนิดพันธุ์และต้นไม้ด้วย (บนโฮสต์อย่าง Railway ให้ตั้งเป็น environment variable ชื่อ <code>GEMINI_API_KEY</code> แทน)</p>
     <p class="field-hint muted-note"><code>config/local.php</code> อยู่ใน <code>.gitignore</code> แล้ว จะไม่ถูกคอมมิตเข้า git โดยไม่ตั้งใจ</p>
   </section>
 </div>

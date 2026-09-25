@@ -368,6 +368,16 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
       <button type="button" class="btn-outline btn-sm" data-photo-action="gallery">🖼️ เลือกจากคลังภาพ</button>
     </div>
     <input type="file" id="image" name="image" accept="image/jpeg,image/png,image/gif,image/webp" data-preview-target="image-preview" hidden>
+    <div data-ai-identify-for="image" data-endpoint="identify_tree.php" data-apply-label="เลือกชื่อต้นไม้นี้ให้" data-require-match="1"
+         data-no-match-href="species_form.php" data-no-match-text="เพิ่มเป็นชนิดพันธุ์ใหม่ก่อน"<?= AI_ENABLED ? '' : ' data-ai-unavailable="1"' ?>>
+      <button type="button" class="btn-outline btn-sm" data-ai-action="identify" disabled>🔍 ให้ AI ช่วยระบุชนิดต้นไม้จากรูปนี้</button>
+      <?php if (!AI_ENABLED): ?>
+        <p class="field-hint">ต้องตั้งค่า Gemini API key ก่อนจึงจะใช้ได้ — ดูที่หน้า <a href="settings.php#ai-translation">ตั้งค่า</a></p>
+      <?php else: ?>
+        <p class="field-hint">ไม่รู้ว่าเป็นต้นอะไร? ถ่ายรูปแล้วให้ AI เดา ถ้าตรงกับชื่อที่มีในระบบจะเลือกให้ในช่อง "ชื่อต้นไม้" ด้านบน</p>
+      <?php endif; ?>
+      <div data-ai-output aria-live="polite"></div>
+    </div>
 
     <?php if (!$id): ?>
     <label for="quantity">จำนวนต้น</label>
@@ -447,6 +457,24 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
   filterSubtypesByCategory(document.getElementById('category_code').value);
   filterSpecies();
   updateSpeciesDetails(document.getElementById('species_id').value);
+
+  // "เลือกชื่อต้นไม้นี้ให้" from the AI-identify panel: the AI's answer
+  // matched an existing species, so clear the category/subtype/search filters
+  // (which could be hiding it) and select it in the dropdown.
+  var aiIdentify = document.querySelector('[data-ai-identify-for="image"]');
+  if (aiIdentify) aiIdentify.addEventListener('ai-identify:apply', function (e) {
+    var speciesId = e.detail.result.matched_species_id;
+    if (!speciesId) return;
+    document.getElementById('category_code').value = '';
+    filterSubtypesByCategory('');
+    document.getElementById('subtype_filter').value = '';
+    document.getElementById('species_search').value = '';
+    filterSpecies();
+    var select = document.getElementById('species_id');
+    select.value = String(speciesId);
+    updateSpeciesDetails(select.value);
+    select.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
   </script>
   <?php endif; ?>
 
@@ -551,6 +579,7 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
 <?php require __DIR__ . '/_confirm_modal.php'; ?>
 <script src="../public/assets/js/map-pin-picker.js"></script>
 <script src="../public/assets/js/image-preview.js"></script>
+<script src="../public/assets/js/ai-identify-button.js"></script>
 <script src="../public/assets/js/geolocate-button.js"></script>
 <script src="../public/assets/js/photo-capture-buttons.js"></script>
 </body>

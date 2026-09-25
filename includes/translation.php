@@ -7,6 +7,7 @@
 // disabled or the call fails — nothing on the public page ever errors out
 // over a translation problem.
 require_once __DIR__ . '/functions.php';
+require_once __DIR__ . '/gemini.php';
 
 /** Species fields eligible for AI translation, in display order. Thai is
  *  always the source; name_scientific is deliberately excluded — Latin
@@ -64,56 +65,16 @@ function geminiTranslateFields(array $thaiFieldsByKey, array $targetLangs): ?arr
         . '{' . implode(', ', $shape) . '}' . "\n"
         . "Include every field key listed above.";
 
-    $body = json_encode([
+    // A species with all 8 translatable fields filled in (a few hundred
+    // words of Thai) has been observed taking ~20s for Gemini to translate
+    // in one call — right at the edge of a 20s timeout, so that ended up
+    // intermittently failing (and silently falling back to Thai) on exactly
+    // the richest, most-worth-translating rows. Hence 45s.
+    $innerText = geminiGenerateText([
         'contents' => [['parts' => [['text' => $prompt]]]],
         'generationConfig' => ['response_mime_type' => 'application/json'],
-    ]);
-
-    $url = 'https://generativelanguage.googleapis.com/v1beta/models/' . rawurlencode(GEMINI_MODEL)
-        . ':generateContent';
-
-    $ch = curl_init($url);
-    $curlOpts = [
-        CURLOPT_POST => true,
-        CURLOPT_POSTFIELDS => $body,
-        // Newer Gemini API keys (the "AQ...." format issued by current AI
-        // Studio) are rejected with 401 ACCESS_TOKEN_TYPE_UNSUPPORTED when
-        // sent as the old `?key=` query param — Google's own current docs
-        // send it as this header instead. The header form also works fine
-        // with the older AIzaSy... key format, so this isn't a breaking
-        // change for anyone already using that.
-        CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'X-goog-api-key: ' . GEMINI_API_KEY],
-        CURLOPT_RETURNTRANSFER => true,
-        // A species with all 8 translatable fields filled in (a few hundred
-        // words of Thai) has been observed taking ~20s for Gemini to
-        // translate in one call — right at the edge of a 20s timeout, so
-        // that ended up intermittently failing (and silently falling back
-        // to Thai) on exactly the richest, most-worth-translating rows.
-        CURLOPT_TIMEOUT => 45,
-    ];
-    // generativelanguage.googleapis.com resolves IPv6-first; on a host/
-    // network where outbound IPv6 is misconfigured or blackholed, curl
-    // silently hangs the full timeout trying that address before ever
-    // reaching Google, and every translation quietly no-ops via the
-    // catch-all failure fallback below. Forcing IPv4 sidesteps that, but
-    // only opt-in (GEMINI_FORCE_IPV4) — unconditionally forcing it would be
-    // actively worse on a host where IPv4 is the restricted/slower path.
-    if (GEMINI_FORCE_IPV4) {
-        $curlOpts[CURLOPT_IPRESOLVE] = CURL_IPRESOLVE_V4;
-    }
-    curl_setopt_array($ch, $curlOpts);
-    $response = curl_exec($ch);
-    $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curlError = curl_error($ch);
-    curl_close($ch);
-
-    if ($response === false || $curlError || $status !== 200) {
-        return null;
-    }
-
-    $decoded = json_decode($response, true);
-    $innerText = $decoded['candidates'][0]['content']['parts'][0]['text'] ?? null;
-    if (!is_string($innerText)) {
+    ], 45);
+    if ($innerText === null) {
         return null;
     }
 
