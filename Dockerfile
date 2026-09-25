@@ -57,9 +57,9 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 # start Apache, through docker/entrypoint.sh as usual. Once the setting is
 # cleared in the Railway dashboard (Settings > Deploy > Custom Start Command)
 # this can be deleted.
-RUN printf '#!/bin/sh
-exec apache2-foreground
-' > /usr/local/bin/npm \n    && chmod +x /usr/local/bin/npm
+RUN echo '#!/bin/sh' > /usr/local/bin/npm \
+    && echo 'exec apache2-foreground' >> /usr/local/bin/npm \
+    && chmod +x /usr/local/bin/npm
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["apache2-foreground"]
