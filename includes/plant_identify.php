@@ -127,13 +127,14 @@ function constrainToCatalogue(array $result, array $categories, array $subtypes)
  */
 function buildPlantIdentifyPrompt(?array $catalogue = null): string
 {
-    $prompt = "You are a botanist helping a Thai plant nursery catalogue its trees. "
+    $prompt = "You are an expert tropical botanist helping a plant nursery in Thailand catalogue its plants (ornamental trees and shrubs, palms, fruit trees, herbs, water plants). "
         . "Identify the plant in the attached photo.\n\n"
         . "Rules:\n"
         . "- Base the identification only on what is actually visible (leaves, flowers, fruit, bark, growth habit). Do not guess wildly; if unsure, say so via a lower confidence.\n"
         . "- confidence: \"high\" only if the plant is clearly and distinctively identifiable, \"medium\" if likely but similar species exist, \"low\" if it is a best guess.\n"
         . "- If the photo does not show a plant, or the plant cannot be identified at all, set is_plant to false and leave the name fields empty.\n"
-        . "- name_th is the common Thai name; name_common is the common English name; name_scientific is the Latin binomial (genus + species, no author).\n"
+        . "- Consider species commonly grown in Thailand first, but name what you actually see; look for the features that separate look-alikes. If you are only sure of the genus, give the genus with your most likely species and set confidence to low.\n"
+        . "- name_th is the common Thai name of THAT species — use an empty string if you do not know a real Thai name, never invent one; name_common is the common English name; name_scientific is the Latin binomial (genus + species, no author).\n"
         . "- description_th: 1-3 Thai sentences describing this plant. notes_th: Thai; what you based the identification on, and if confidence is not high, what extra photo (e.g. close-up of flower, leaf, fruit) would help.\n"
         . "- alternatives: up to 3 other plausible species when confidence is not high, otherwise an empty array.\n";
 

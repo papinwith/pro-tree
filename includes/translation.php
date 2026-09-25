@@ -59,6 +59,7 @@ function geminiTranslateFields(array $thaiFieldsByKey, array $targetLangs): ?arr
     $prompt = "You are translating Thai plant/tree catalog content into {$langLabel} for a public information page.\n"
         . "Translate EVERY field below from Thai into {$langLabel}.\n"
         . "Preserve scientific names, proper nouns, and botanical terminology exactly where they appear — do not attempt to translate Latin binomials.\n"
+        . "A Thai plant's common name (for example the `name` field) is NOT a proper noun to leave in Thai: give its usual {$langLabel} common name, and only if none exists, a transliteration.\n"
         . "Keep the tone factual and concise, matching the source.\n\n"
         . "Fields:\n" . implode("\n", $fieldList) . "\n\n"
         . "Respond with ONLY a JSON object of this exact shape (no markdown fences, no commentary):\n"

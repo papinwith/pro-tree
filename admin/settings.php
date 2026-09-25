@@ -127,7 +127,7 @@ $openingHours = $errors ? ($openingHours ?? '') : getSetting($pdo, 'opening_hour
   <section id="ai-translation" class="history-section">
     <h2>AI (Gemini) — คำแปล และระบุชนิดต้นไม้จากรูป</h2>
     <?php if (AI_ENABLED): ?>
-      <div class="flash">✓ ตั้งค่า Gemini API key แล้ว — ใช้โมเดล <code><?= e(GEMINI_MODEL) ?></code></div>
+      <div class="flash">✓ ตั้งค่า Gemini API key แล้ว — ใช้โมเดล <code><?= e(GEMINI_MODEL) ?></code><?= GEMINI_FALLBACK_MODELS ? ' (สำรอง: <code>' . e(implode(', ', GEMINI_FALLBACK_MODELS)) . '</code>)' : '' ?></div>
     <?php else: ?>
       <div class="flash error">✗ ยังไม่ได้ตั้งค่า Gemini API key</div>
     <?php endif; ?>

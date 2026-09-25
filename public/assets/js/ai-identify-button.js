@@ -185,7 +185,7 @@
       if (!tokenField) { showMessage('ไม่พบรหัสความปลอดภัยของฟอร์ม กรุณารีเฟรชหน้า', true); return; }
 
       button.disabled = true;
-      showMessage('กำลังให้ AI ดูรูป… (ใช้เวลาประมาณ 5-20 วินาที)', false);
+      showMessage('กำลังให้ AI ดูรูป… (ปกติไม่กี่วินาที)', false);
 
       sourceBlob()
         .then(downscale)

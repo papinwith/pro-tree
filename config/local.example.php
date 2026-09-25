@@ -12,9 +12,13 @@ if (!defined('GEMINI_API_KEY')) {
 }
 
 // Optional — only uncomment if you want a model other than the default
-// set in config/config.php.
+// set in config/config.php (gemini-3.5-flash-lite, with automatic fallback to
+// the models in GEMINI_FALLBACK_MODELS when it is busy or out of quota).
 // if (!defined('GEMINI_MODEL')) {
-//     define('GEMINI_MODEL', 'gemini-2.0-flash');
+//     define('GEMINI_MODEL', 'gemini-3.5-flash-lite');
+// }
+// if (!defined('GEMINI_FALLBACK_MODELS')) {
+//     define('GEMINI_FALLBACK_MODELS', ['gemini-3.1-flash-lite', 'gemini-3.5-flash']);
 // }
 
 // Optional — only uncomment if translations are silently failing/falling

@@ -58,3 +58,45 @@ the app and a mock Gemini API locally (`GEMINI_API_BASE` env override) and
 checks auth/permission/CSRF/upload validation, the real request sent to Gemini
 (photo as inline data, key in the `X-goog-api-key` header), success, no-match,
 not-a-plant, malformed output and upstream HTTP errors.
+
+## Speed and accuracy (Sept 2026 benchmark)
+
+Measured on real photos (Wikimedia Commons species categories as ground
+truth — 8-10 photos per model, so treat it as indicative, not a study):
+
+| Model | Correct species | Median time | Reliability |
+|---|---|---|---|
+| `gemini-3.5-flash-lite` (**default**) | 7/8 (8/8 right genus) | ~3.5 s | no failures |
+| `gemini-3.1-flash-lite` | 6/10 (8/10 genus) | ~5.7 s | no failures |
+| `gemini-3.5-flash` | 5/6 of those that answered | 10-17 s | 4/10 failed (busy/quota) |
+| `gemini-3-flash-preview` | 4/10 (6/10 genus) | ~10 s | 4/10 failed |
+| `gemini-3.6-flash` (previous default) | — | 13 s | mostly failed (quota/busy) |
+
+The full species write-up (all fields + category/subtype) takes ~4 s with the
+default model, down from 10-27 s. Asking the model to list observed features
+before naming the plant did not change accuracy, so the shorter prompt stays.
+
+### Model chain and quota
+
+`GEMINI_MODEL` (default `gemini-3.5-flash-lite`) is tried first, then each of
+`GEMINI_FALLBACK_MODELS` (comma-separated env var / constant; default
+`gemini-3.1-flash-lite,gemini-3.5-flash,gemini-3-flash-preview`) whenever a model
+answers 429 (quota), 503 (overloaded), 500/502/504 or 404 (retired). If every
+model was merely overloaded it pauses 2 s and goes round once more. Errors that
+would fail identically everywhere (400, bad key, safety block) and network
+timeouts are not retried on another model.
+
+**The free tier allows only ~20 requests per model per day**
+(`GenerateRequestsPerDayPerProjectPerModel-FreeTier`), shared by translation and
+identification. The chain gives roughly 20 x the number of models per day; for
+real use enable billing on the Google AI project. Some models (e.g. 3.1 Pro) have
+a free-tier limit of 0.
+
+### Known limits
+
+- Look-alikes: e.g. *Plumeria rubra* was answered as *P. pudica* with "high"
+  confidence — the confidence value is the model's own and can be overconfident.
+- The lite model occasionally emits a stray non-Thai character inside long Thai
+  text; always read the drafted text before saving.
+- A single photo is often not enough (a leaf-only or bark-only shot). Taking a
+  photo that shows flower/leaf/fruit clearly matters more than any setting here.

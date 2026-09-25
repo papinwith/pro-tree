@@ -67,8 +67,24 @@ if (!defined('APP_BASE_URL')) {
 if (!defined('GEMINI_API_KEY')) {
     define('GEMINI_API_KEY', getenv('GEMINI_API_KEY') ?: '');
 }
+// Model used first. gemini-3.5-flash-lite is the default because it was the
+// fastest and most dependable when benchmarked on real plant photos (median
+// ~3.5s, no failures, correct species 7 of 8 times) — the bigger "flash"
+// models were 10-17s each and frequently answered 503 "high demand" or ran out
+// of free-tier quota.
 if (!defined('GEMINI_MODEL')) {
-    define('GEMINI_MODEL', getenv('GEMINI_MODEL') ?: 'gemini-3.6-flash');
+    define('GEMINI_MODEL', getenv('GEMINI_MODEL') ?: 'gemini-3.5-flash-lite');
+}
+// Tried in order when the model above can't answer (quota used up, overloaded,
+// retired). Comma-separated; set the variable to an empty string for no
+// fallbacks. Free-tier quotas are per model per day, so each extra model adds
+// its own allowance.
+if (!defined('GEMINI_FALLBACK_MODELS')) {
+    $fallbacks = getenv('GEMINI_FALLBACK_MODELS');
+    define('GEMINI_FALLBACK_MODELS', array_values(array_filter(array_map(
+        'trim',
+        explode(',', $fallbacks === false ? 'gemini-3.1-flash-lite,gemini-3.5-flash,gemini-3-flash-preview' : $fallbacks)
+    ))));
 }
 // Base URL of the Gemini API — only ever overridden by the tests, which point
 // it at a local mock server so the AI features can be exercised end to end

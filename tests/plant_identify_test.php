@@ -143,6 +143,10 @@ $mockResponseFile = "$tmp/mock_gemini_response.txt";
 $mockStatusFile = "$tmp/mock_gemini_status.txt";
 $mockLogFile = "$tmp/mock_gemini_request.json";
 $mockRouter = "$tmp/mock_gemini_router.php";
+$mockFailFile = "$tmp/mock_gemini_fail_models.txt";
+$mockPathsFile = "$tmp/mock_gemini_paths.log";
+@unlink($mockFailFile);
+@unlink($mockPathsFile);
 @unlink($mockLogFile);
 
 // A stand-in for generativelanguage.googleapis.com: records the request it
@@ -155,7 +159,14 @@ file_put_contents("$dir/mock_gemini_request.json", json_encode([
     'api_key_header' => $_SERVER['HTTP_X_GOOG_API_KEY'] ?? null,
     'body' => json_decode(file_get_contents('php://input'), true),
 ]));
+file_put_contents("$dir/mock_gemini_paths.log", parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) . "\n", FILE_APPEND);
 $status = (int) (@file_get_contents("$dir/mock_gemini_status.txt") ?: 200);
+// models listed here (comma-separated) answer 429 regardless of the status file
+foreach (array_filter(explode(',', (string) @file_get_contents("$dir/mock_gemini_fail_models.txt"))) as $failModel) {
+    if (str_contains($_SERVER['REQUEST_URI'], '/models/' . $failModel . ':')) {
+        $status = 429;
+    }
+}
 http_response_code($status);
 header('Content-Type: application/json');
 if ($status !== 200) {
@@ -198,9 +209,11 @@ $appProc = startServer(
     "$php -S $host:$appPort -t " . escapeshellarg(__DIR__ . '/..'),
     $host,
     $appPort,
-    // 8 identify calls/hour/admin: exactly the number of calls that reach the
-    // mock below, so the next one exercises the rate limit.
-    ['GEMINI_API_KEY' => 'test-key-123', 'GEMINI_API_BASE' => "http://$host:$mockPort", 'AI_IDENTIFY_MAX_PER_HOUR' => '8']
+    // 11 identify calls/hour/admin: exactly the number of calls that reach the
+    // mock below, so the next one exercises the rate limit. Two models (a, then
+    // b as its fallback) so the model chain can be tested.
+    ['GEMINI_API_KEY' => 'test-key-123', 'GEMINI_API_BASE' => "http://$host:$mockPort", 'AI_IDENTIFY_MAX_PER_HOUR' => '11',
+     'GEMINI_MODEL' => 'mock-model-a', 'GEMINI_FALLBACK_MODELS' => 'mock-model-b']
 );
 // More app instances, each configured for one specific path:
 //  - no API key ("AI not configured")
@@ -222,14 +235,14 @@ $execAdmin = createTestAdmin($pdo, 2);
 $editorAdmin = createTestAdmin($pdo, 1);
 $cookieFiles = [];
 
-register_shutdown_function(function () use (&$appProc, &$mockProc, &$noKeyProc, &$iniSizeProc, &$postSizeProc, &$cookieFiles, $mockRouter, $mockResponseFile, $mockStatusFile, $mockLogFile) {
+register_shutdown_function(function () use (&$appProc, &$mockProc, &$noKeyProc, &$iniSizeProc, &$postSizeProc, &$cookieFiles, $mockRouter, $mockResponseFile, $mockStatusFile, $mockLogFile, $mockFailFile, $mockPathsFile) {
     foreach ([$appProc, $mockProc, $noKeyProc, $iniSizeProc, $postSizeProc] as $proc) {
         if (is_resource($proc)) {
             proc_terminate($proc);
             proc_close($proc);
         }
     }
-    foreach (array_merge($cookieFiles, [$mockRouter, $mockResponseFile, $mockStatusFile, $mockLogFile]) as $f) {
+    foreach (array_merge($cookieFiles, [$mockRouter, $mockResponseFile, $mockStatusFile, $mockLogFile, $mockFailFile, $mockPathsFile]) as $f) {
         @unlink($f);
     }
 });
@@ -434,6 +447,31 @@ try {
         request($endpoint, $admin['cookie'], ['image' => $photo(), 'csrf_token' => $admin['csrf']], true);
         request($endpoint, $admin['cookie'], ['image' => $photo(), 'csrf_token' => $admin['csrf']], true);
     }
+    // --- model chain: primary model can't answer -> the fallback model does ---
+    $pathsNow = fn() => array_values(array_filter(explode("\n", (string) @file_get_contents($mockPathsFile))));
+    $modelOf = fn(string $path) => preg_match('#/models/([^:/]+):#', $path, $mm) ? $mm[1] : '';
+    file_put_contents($mockResponseFile, json_encode(['is_plant' => true, 'name_th' => 'ตอบจากโมเดลสำรอง', 'name_scientific' => 'Chainus fallbackus', 'confidence' => 'medium'], JSON_UNESCAPED_UNICODE));
+    file_put_contents($mockFailFile, 'mock-model-a');
+    @unlink($mockPathsFile);
+    $r = request($endpoint, $admin['cookie'], ['image' => $photo(), 'csrf_token' => $admin['csrf']], true);
+    $tried = array_map($modelOf, $pathsNow());
+    check('primary model out of quota (429) -> the fallback model answers, no error shown',
+        $r['status'] === 200 && ($r['json']['result']['name_th'] ?? '') === 'ตอบจากโมเดลสำรอง' && $tried === ['mock-model-a', 'mock-model-b'], "got {$r['status']} tried " . implode(',', $tried) . ": {$r['body']}");
+    @unlink($mockFailFile);
+
+    file_put_contents($mockStatusFile, '503');
+    @unlink($mockPathsFile);
+    $r = request($endpoint, $admin['cookie'], ['image' => $photo(), 'csrf_token' => $admin['csrf']], true);
+    $tried = array_map($modelOf, $pathsNow());
+    check('every model overloaded (503) -> both models tried, then one more pass after a pause, then a clean 502',
+        $r['status'] === 502 && $tried === ['mock-model-a', 'mock-model-b', 'mock-model-a', 'mock-model-b'] && str_contains($r['json']['error'] ?? '', '503'), "got {$r['status']} tried " . implode(',', $tried) . ": {$r['body']}");
+
+    file_put_contents($mockStatusFile, '400');
+    @unlink($mockPathsFile);
+    $r = request($endpoint, $admin['cookie'], ['image' => $photo(), 'csrf_token' => $admin['csrf']], true);
+    $tried = array_map($modelOf, $pathsNow());
+    check('a request error (400) would fail on every model, so it is not retried on another', $r['status'] === 502 && $tried === ['mock-model-a'], "tried " . implode(',', $tried));
+    file_put_contents($mockStatusFile, '200');
     // failure modes -> a clean JSON error, never a PHP error
     file_put_contents($mockResponseFile, 'this is not json at all');
     $r = request($endpoint, $admin['cookie'], ['image' => $photo(), 'csrf_token' => $admin['csrf']], true);
@@ -452,7 +490,7 @@ try {
         $r['status'] === 502 && str_contains($r['json']['error'] ?? '', 'โควตา') && !str_contains($r['body'], 'mock failure'), "got {$r['status']}: {$r['body']}");
     file_put_contents($mockStatusFile, '200');
 
-    // Eight calls have now reached the mock (limit is 8/hour): the seventh is
+    // Eleven calls have now reached the mock (limit is 11/hour): the seventh is
     // refused locally, before it can cost anything.
     @unlink($mockLogFile);
     $r = request($endpoint, $admin['cookie'], ['image' => $photo(), 'csrf_token' => $admin['csrf']], true);
