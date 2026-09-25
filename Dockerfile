@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Railway, causing every single request (even static files) to 502.
 RUN (a2dismod mpm_event || true) && (a2dismod mpm_worker || true) && a2enmod mpm_prefork
 
-RUN a2enmod rewrite
+RUN a2enmod rewrite expires deflate
 
 # Serve the whole repo (not just public/) so both /public/... (visitor
 # pages) and /admin/... (admin panel) are reachable, same as running

@@ -18,6 +18,15 @@ function db(): PDO
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_EMULATE_PREPARES => false,
+            // Send each query and its parameter values in ONE round trip
+            // (PQexecParams) instead of prepare + execute + DEALLOCATE — three
+            // network round trips per statement otherwise. Parameters are still
+            // bound server-side (no string interpolation), so it is exactly as
+            // safe; only named server-side prepared statements are given up,
+            // which this app never reuses (every statement is prepared, run
+            // once and discarded). With a database ~100 ms away that was
+            // roughly half of every page's time.
+            PDO::PGSQL_ATTR_DISABLE_PREPARES => true,
         ]);
         // Match Postgres's own session clock to Asia/Bangkok — the app's PHP
         // side is already pinned there (config.php's

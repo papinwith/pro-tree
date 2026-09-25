@@ -735,12 +735,30 @@ function assetCode(PDO $pdo, int $treeId): string
     return $prefix . '-' . str_pad((string) $treeId, 6, '0', STR_PAD_LEFT);
 }
 
+/**
+ * Reads one setting. The whole (small) settings table is loaded on first use
+ * and kept for the rest of the request — a page asks for several keys, and
+ * each separate query costs a full round trip to the database. setSetting()
+ * keeps this copy in step, so a value written earlier in the same request is
+ * read back correctly.
+ */
 function getSetting(PDO $pdo, string $key, ?string $default = null): ?string
 {
-    $stmt = $pdo->prepare('SELECT setting_value FROM settings WHERE setting_key = :k');
-    $stmt->execute(['k' => $key]);
-    $value = $stmt->fetchColumn();
-    return $value !== false ? $value : $default;
+    $settings = &settingsCache();
+    if ($settings === null) {
+        $settings = [];
+        foreach ($pdo->query('SELECT setting_key, setting_value FROM settings')->fetchAll() as $row) {
+            $settings[$row['setting_key']] = $row['setting_value'];
+        }
+    }
+    return array_key_exists($key, $settings) && $settings[$key] !== null ? $settings[$key] : $default;
+}
+
+/** Per-request copy of the settings table (null = not loaded yet). */
+function &settingsCache(): ?array
+{
+    static $cache = null;
+    return $cache;
 }
 
 function setSetting(PDO $pdo, string $key, string $value): void
@@ -750,6 +768,10 @@ function setSetting(PDO $pdo, string $key, string $value): void
          ON CONFLICT (setting_key) DO UPDATE SET setting_value = :v2'
     );
     $stmt->execute(['k' => $key, 'v' => $value, 'v2' => $value]);
+    $settings = &settingsCache();
+    if ($settings !== null) {
+        $settings[$key] = $value;
+    }
 }
 
 function isValidEmail(string $email): bool

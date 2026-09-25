@@ -18,6 +18,28 @@
 	# running deployment. Handling just these two entry points explicitly,
 	# building the Location ourselves from the proxy's forwarded scheme
 	# and the original Host header, is what actually works.
+	# Let browsers reuse static files between page switches instead of asking the
+	# server about each one again (every request costs a round trip), and compress
+	# text responses. Short lifetimes because CSS/JS have no version in their URL;
+	# QR images keep a fixed name per tree, so they are never cached. Guarded with
+	# IfModule so a missing module can never stop Apache from starting.
+	<IfModule mod_expires.c>
+		ExpiresActive On
+		ExpiresByType text/css "access plus 10 minutes"
+		ExpiresByType application/javascript "access plus 10 minutes"
+		ExpiresByType text/javascript "access plus 10 minutes"
+		ExpiresByType image/png "access plus 1 hour"
+		ExpiresByType image/jpeg "access plus 1 hour"
+		ExpiresByType image/webp "access plus 1 hour"
+		ExpiresByType image/gif "access plus 1 hour"
+		<LocationMatch "^/public/assets/uploads/qr/">
+			ExpiresActive Off
+		</LocationMatch>
+	</IfModule>
+	<IfModule mod_deflate.c>
+		AddOutputFilterByType DEFLATE text/html text/css application/javascript text/javascript application/json image/svg+xml
+	</IfModule>
+
 	DirectorySlash Off
 	RewriteEngine On
 	RewriteCond %{HTTP:X-Forwarded-Proto} =https

@@ -96,35 +96,40 @@ function can(string $permissionKey): bool
     if (empty($_SESSION['admin_role_id'])) {
         return false;
     }
-    $stmt = db()->prepare(
-        'SELECT 1 FROM role_permissions rp
-         JOIN permissions p ON p.id = rp.permission_id
-         WHERE rp.role_id = :role_id AND p.permission_key = :key
-         LIMIT 1'
-    );
-    $stmt->execute(['role_id' => $_SESSION['admin_role_id'], 'key' => $permissionKey]);
-    return (bool) $stmt->fetchColumn();
+    return in_array($permissionKey, rolePermissionKeys((int) $_SESSION['admin_role_id']), true);
 }
 
 /**
- * True if the current admin holds ANY of the given permissions — one query,
- * where calling can() once per key costs a database round trip each (slow
- * when the database is remote and the caller is on a tight time budget).
+ * All permission keys of a role, read once per request and reused by every
+ * can()/canAny() call after it — a page checks a dozen or more permissions
+ * (one per button), and each separate query was a full database round trip.
+ * Still fresh on every request, so a role change applies on the very next one.
+ */
+function rolePermissionKeys(int $roleId): array
+{
+    static $cache = [];
+    if (!isset($cache[$roleId])) {
+        $stmt = db()->prepare(
+            'SELECT p.permission_key FROM role_permissions rp
+             JOIN permissions p ON p.id = rp.permission_id
+             WHERE rp.role_id = :role_id'
+        );
+        $stmt->execute(['role_id' => $roleId]);
+        $cache[$roleId] = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    }
+    return $cache[$roleId];
+}
+
+/**
+ * True if the current admin holds ANY of the given permissions (shares the
+ * once-per-request permission read with can()).
  */
 function canAny(array $permissionKeys): bool
 {
     if (empty($_SESSION['admin_role_id']) || !$permissionKeys) {
         return false;
     }
-    $placeholders = implode(',', array_fill(0, count($permissionKeys), '?'));
-    $stmt = db()->prepare(
-        "SELECT 1 FROM role_permissions rp
-         JOIN permissions p ON p.id = rp.permission_id
-         WHERE rp.role_id = ? AND p.permission_key IN ($placeholders)
-         LIMIT 1"
-    );
-    $stmt->execute(array_merge([$_SESSION['admin_role_id']], array_values($permissionKeys)));
-    return (bool) $stmt->fetchColumn();
+    return (bool) array_intersect($permissionKeys, rolePermissionKeys((int) $_SESSION['admin_role_id']));
 }
 
 /**

@@ -2,7 +2,10 @@
 require_once __DIR__ . '/../includes/auth.php';
 
 startAdminSession();
-$pdo = db();
+// Only connect to the database when this request actually needs it (a login
+// attempt, or the dev-only account picker). Just showing the empty form needs
+// none — and opening a connection to a remote database costs ~0.7 s.
+$pdo = ($_SERVER['REQUEST_METHOD'] === 'POST' || devLoginBypassAllowed()) ? db() : null;
 
 $error = null;
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
