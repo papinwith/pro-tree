@@ -91,6 +91,18 @@ $c = constrainToCatalogue(['category_code' => '99', 'subtype_ids' => [1, 2]], $c
 check('constrain: an invented category code is dropped (category_name null); subtypes then only need to exist',
     $c['category_code'] === null && $c['category_name'] === null && $c['subtype_ids'] === [1, 2]);
 
+foreach ([['Unknown plant', 'x'], ['unidentified', 'x'], ['N/A', 'x']] as [$sci, $th]) {
+    $n = normalizePlantIdentification(['is_plant' => true, 'name_scientific' => $sci]);
+    check('normalize: "' . $sci . '" is the model giving up, not a name -> not identified', $n['is_plant'] === false && $n['name_scientific'] === '');
+}
+$n = normalizePlantIdentification(['is_plant' => true, 'name_scientific' => 'Ficus sp.', 'name_th' => 'ไม่ทราบ']);
+check('normalize: a real genus-level answer is kept, a Thai "ไม่ทราบ" (unknown) name is dropped', $n['is_plant'] === true && $n['name_scientific'] === 'Ficus sp.' && $n['name_th'] === '');
+
+$rows = [['name_scientific' => 'Cassia fistula L.'], ['name_scientific' => 'cassia FISTULA'], ['name_scientific' => 'Ficus'], ['name_scientific' => null], ['name_scientific' => 'Plumeria rubra']];
+check('knownSpeciesForPrompt: genus + species only, de-duplicated, single-word/empty names skipped', knownSpeciesForPrompt($rows) === ['Cassia fistula', 'Plumeria rubra'], json_encode(knownSpeciesForPrompt($rows)));
+check('prompt: known species are offered as candidates, with the "ignore it unless it clearly matches" wording',
+    str_contains(buildPlantIdentifyPrompt(null, $rows), 'Cassia fistula; Plumeria rubra') && str_contains(buildPlantIdentifyPrompt(null, $rows), 'ignore this list'));
+check('prompt: no list paragraph when there are no known species', !str_contains(buildPlantIdentifyPrompt(null, []), 'already catalogues'));
 $briefPrompt = buildPlantIdentifyPrompt();
 $fullPrompt = buildPlantIdentifyPrompt(['categories' => $cats, 'subtypes' => $subs]);
 check('prompt: brief mode asks for the identification only', !str_contains($briefPrompt, 'care_instructions') && !str_contains($briefPrompt, 'category_code'));
@@ -545,6 +557,16 @@ try {
         identifyCacheAge('categories') !== null && identifyCacheAge('subtypes') !== null && identifyCacheAge('species') !== null);
     // Take the role away in the database. A request that had to consult the database would now be refused;
     // one served from the just-verified marker is not (that short window is the documented trade-off).
+    if ($existing) {
+        $r0 = request($warmEndpoint, $warm['cookie'], ['image' => $photo(), 'csrf_token' => $warm['csrf']], true);
+        $sentWarm = json_decode((string) @file_get_contents($mockLogFile), true) ?: [];
+        $warmText = '';
+        foreach ($sentWarm['body']['contents'][0]['parts'] ?? [] as $p) {
+            $warmText .= $p['text'] ?? '';
+        }
+        check('with the species list cached (form opened), the prompt offers the nursery\'s own species as candidates',
+            $r0['status'] === 200 && str_contains($warmText, scientificNameKey($existing['name_scientific']) === '' ? 'zzz' : implode(' ', array_slice(preg_split('/\s+/', trim($existing['name_scientific'])), 0, 2))), substr($warmText, -700));
+    }
     $pdo->prepare('UPDATE admins SET role_id = 2 WHERE username = :u')->execute(['u' => $warmAdmin['username']]);
     $r = request($warmEndpoint, $warm['cookie'], ['image' => $photo(), 'csrf_token' => $warm['csrf'], 'detail' => 'full'], true);
     check('after the form was opened, the click is served with no permission lookup (verified marker, session-side)', $r['status'] === 200 && ($r['json']['ok'] ?? false) === true, "got {$r['status']}: {$r['body']}");

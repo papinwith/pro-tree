@@ -40,6 +40,13 @@ function normalizePlantIdentification(array $raw): array
 
     $nameTh = $str($raw['name_th'] ?? null, 120);
     $nameScientific = $str($raw['name_scientific'] ?? null, 160);
+    // "Unknown plant" / "unidentified" is the model saying it can't tell, not a name.
+    if (preg_match('/^\s*(unknown|unidentified|n\/a|none)\b/i', $nameScientific)) {
+        $nameScientific = '';
+    }
+    if (preg_match('/^\s*(unknown|unidentified|n\/a|none|ไม่ทราบ|ไม่ระบุ)/iu', $nameTh)) {
+        $nameTh = '';
+    }
     // Nothing usable to suggest, whatever `is_plant` claims. The model
     // sometimes answers "true"/1 instead of a JSON boolean, so accept those
     // too (an unrecognized value, e.g. "banana" or an array, counts as false).
@@ -125,7 +132,7 @@ function constrainToCatalogue(array $result, array $categories, array $subtypes)
  * properties, benefits, cautions, per-part uses — and a category/subtype
  * picked from the catalogue's own lists; without it, just the identification.
  */
-function buildPlantIdentifyPrompt(?array $catalogue = null): string
+function buildPlantIdentifyPrompt(?array $catalogue = null, ?array $knownSpecies = null): string
 {
     $prompt = "You are an expert tropical botanist helping a plant nursery in Thailand catalogue its plants (ornamental trees and shrubs, palms, fruit trees, herbs, water plants). "
         . "Identify the plant in the attached photo.\n\n"
@@ -137,6 +144,19 @@ function buildPlantIdentifyPrompt(?array $catalogue = null): string
         . "- name_th is the common Thai name of THAT species — use an empty string if you do not know a real Thai name, never invent one; name_common is the common English name; name_scientific is the Latin binomial (genus + species, no author).\n"
         . "- description_th: 1-3 Thai sentences describing this plant. notes_th: Thai; what you based the identification on, and if confidence is not high, what extra photo (e.g. close-up of flower, leaf, fruit) would help.\n"
         . "- alternatives: up to 3 other plausible species when confidence is not high, otherwise an empty array.\n";
+
+    // The nursery's own species, as candidates. On 10 real photos this lifted
+    // correct species from 7 to 9 (it settles look-alikes such as Plumeria rubra
+    // vs alba in favour of the one actually stocked) and did not cause a single
+    // false match when the plant was NOT on the list — because the wording tells
+    // the model to ignore the list unless the photo clearly matches.
+    $candidates = knownSpeciesForPrompt($knownSpecies);
+    if ($candidates) {
+        $prompt .= "- The nursery already catalogues these species: " . implode('; ', $candidates) . ". If the photo clearly shows one of them, answer with exactly that scientific name. If it does not clearly match any of them, ignore this list and name what you actually see — the plant may be new to the nursery.
+";
+    }
+    $prompt .= "- Never answer \"Unknown\": if you cannot name the species give the genus with sp., and if you cannot even do that, set is_plant to false.
+";
 
     $shape = '"is_plant": true, "name_th": "...", "name_common": "...", "name_scientific": "...", "confidence": "high|medium|low", '
         . '"description_th": "...", "notes_th": "...", "alternatives": [{"name_th": "...", "name_scientific": "..."}]';
@@ -169,15 +189,16 @@ function buildPlantIdentifyPrompt(?array $catalogue = null): string
  * $catalogue (see buildPlantIdentifyPrompt()) for the full write-up; the
  * category/subtype it picks are then validated against that same catalogue.
  * $budgetSeconds is a hard cap on the whole AI call (see geminiGenerateText()).
+ * $knownSpecies (rows with name_scientific) are offered to the model as candidates.
  */
-function identifyPlantFromImage(string $imageBytes, string $mimeType, ?array $catalogue = null, float $budgetSeconds = 60.0): array
+function identifyPlantFromImage(string $imageBytes, string $mimeType, ?array $catalogue = null, float $budgetSeconds = 60.0, ?array $knownSpecies = null): array
 {
     $error = null;
     $timedOut = false;
     $innerText = geminiGenerateText([
         'contents' => [[
             'parts' => [
-                ['text' => buildPlantIdentifyPrompt($catalogue)],
+                ['text' => buildPlantIdentifyPrompt($catalogue, $knownSpecies)],
                 ['inline_data' => ['mime_type' => $mimeType, 'data' => base64_encode($imageBytes)]],
             ],
         ]],
@@ -354,4 +375,40 @@ function identifyCacheAge(string $name): ?int
     $path = sys_get_temp_dir() . '/tree_ai_cache_' . preg_replace('/[^a-z0-9_]/i', '', $name) . '.json';
     clearstatcache(true, $path);
     return is_file($path) ? max(0, time() - (int) @filemtime($path)) : null;
+}
+
+/**
+ * Scientific names (genus + species, deduplicated, max 150 so the prompt stays
+ * small) of the nursery's own species, for buildPlantIdentifyPrompt().
+ */
+function knownSpeciesForPrompt(?array $speciesRows): array
+{
+    $names = [];
+    foreach ($speciesRows ?? [] as $row) {
+        $sci = trim((string) ($row['name_scientific'] ?? ''));
+        $key = scientificNameKey($sci);
+        if ($key !== '' && str_contains($key, ' ') && !isset($names[$key])) {
+            [$genus, $species] = explode(' ', $key, 2);
+            $names[$key] = ucfirst($genus) . ' ' . $species; // "Cassia fistula", whatever the stored casing
+        }
+    }
+    return array_slice(array_values($names), 0, 150);
+}
+
+/**
+ * Like identifyCached() but never loads: returns the cached list if a fresh copy
+ * exists, else null. For data that improves the answer but is not worth a
+ * ~1 s database read while the request's time budget is running.
+ */
+function identifyCachedIfFresh(string $name, int $ttlSeconds): ?array
+{
+    if ($ttlSeconds <= 0) {
+        return null;
+    }
+    $age = identifyCacheAge($name);
+    if ($age === null || $age >= $ttlSeconds) {
+        return null;
+    }
+    $data = json_decode((string) @file_get_contents(sys_get_temp_dir() . '/tree_ai_cache_' . preg_replace('/[^a-z0-9_]/i', '', $name) . '.json'), true);
+    return is_array($data) ? $data : null;
 }

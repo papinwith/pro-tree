@@ -128,3 +128,27 @@ Measured end to end through the real endpoint with the real API, from a
 machine with a slow link to both Google and the database (form opened first),
 5 photos x brief/full: **10/10 answered, 1.9-3.7 s** (median ~3 s). Before
 these changes the same run timed out on 4 of 10 requests with a 5 s cap.
+
+## Accuracy experiments (Sept 2026)
+
+Same 10 real photos each time, `gemini-3.5-flash-lite`, photos at 1024 px:
+
+| Variant | Correct species | Median time | Adopted |
+|---|---|---|---|
+| Baseline | 7/10 | 4.7-6 s | - |
+| **Nursery's own species offered as candidates** (truth on the list) | **9/10** | 4.5 s | **yes** |
+| Same, but the true species NOT on the list | 7/10 (no worse) | 4.7 s | (proves it does not cause false matches) |
+| Two photos of the plant sent together | 7/10 | 9.1 s | no: no gain, twice as slow, breaks the 5 s cap |
+| Thinking level low / medium | 8/10 | 3.0 / 4.7 s | no |
+| Ask for observed features before the name | no change | slower | no |
+
+The candidate list is the scientific names (genus + species) of the species
+already in the catalogue, taken from the cached species list only if it is
+already cached (`identifyCachedIfFresh()`): reading it from the database inside
+the request would cost ~1 s of the AI's budget. The wording tells the model to
+ignore the list unless the photo clearly matches, so a genuinely new plant is
+still named for what it is. It settles look-alikes in favour of the species the
+nursery actually stocks (e.g. *Plumeria rubra* vs *P. alba*).
+
+Also: an answer of "Unknown ..." / "ไม่ทราบ" is treated as "could not tell"
+instead of being shown as a name.

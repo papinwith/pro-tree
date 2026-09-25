@@ -91,7 +91,10 @@ if (($_POST['detail'] ?? '') === 'full' && $speciesOk) {
 // what has already been spent — minus a little for matching the answer against
 // the catalogue afterwards — is the AI's budget, fallback models included.
 $budget = max(1.5, AI_IDENTIFY_MAX_SECONDS - (microtime(true) - $requestStartedAt) - 0.4);
-$outcome = identifyPlantFromImage((string) file_get_contents($_FILES['image']['tmp_name']), $imageType['mime'], $catalogue, $budget);
+// The nursery's own species help the model settle look-alikes — but only if the
+// list is already cached: reading it from the database here would spend ~1 s of
+// the AI's time.
+$outcome = identifyPlantFromImage((string) file_get_contents($_FILES['image']['tmp_name']), $imageType['mime'], $catalogue, $budget, identifyCachedIfFresh('species', AI_IDENTIFY_CACHE_SECONDS));
 if (!$outcome['ok']) {
     identifyJson(!empty($outcome['timed_out']) ? 504 : 502, ['ok' => false, 'timed_out' => !empty($outcome['timed_out']), 'error' => $outcome['error']]);
 }
