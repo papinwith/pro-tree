@@ -54,11 +54,12 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 # applies to every deployment, and it can't be cleared from the CLI. This image
 # is PHP on Apache and has no Node, so container creation failed with "The
 # executable `npm` could not be found". This stand-in makes that command simply
-# start Apache, through docker/entrypoint.sh as usual. Once the setting is
+# start Apache through docker/entrypoint.sh (which sets the port and the MPM;
+# a start command bypasses the ENTRYPOINT, so it must be called explicitly). Once the setting is
 # cleared in the Railway dashboard (Settings > Deploy > Custom Start Command)
 # this can be deleted.
 RUN echo '#!/bin/sh' > /usr/local/bin/npm \
-    && echo 'exec apache2-foreground' >> /usr/local/bin/npm \
+    && echo 'exec /usr/local/bin/entrypoint.sh apache2-foreground' >> /usr/local/bin/npm \
     && chmod +x /usr/local/bin/npm
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
