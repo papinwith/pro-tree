@@ -104,8 +104,9 @@ a free-tier limit of 0.
 ## Hard time cap (5 seconds)
 
 The identify request is cut off at `AI_IDENTIFY_MAX_SECONDS` (default **5**,
-minimum 2), measured from the moment the request starts — the script's own
-work and any fallback models all come out of that one budget. If the AI hasn't
+minimum 2), measured from the moment the server has received the photo (upload time
+on a slow connection is not the server's to control) — the script's own work
+and any fallback models all come out of that one budget. If the AI hasn't
 answered in time the admin gets HTTP 504 and "AI ตอบช้าเกินเวลาที่กำหนด …
 กรุณาลองใหม่" (`timed_out: true`) instead of waiting. The button also shows a
 live seconds counter.

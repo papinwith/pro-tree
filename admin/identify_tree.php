@@ -4,6 +4,10 @@
 // returns Gemini's best-guess identification plus the id of a matching
 // already-catalogued species, if any. Never writes to the database — the
 // admin reviews the suggestion and applies it (or not) in the form.
+// The time cap below is measured from here: PHP has already received the whole
+// upload by the time this line runs, so a slow phone connection sending the
+// photo doesn't eat the budget the AI needs (that part is out of the server's hands).
+$requestStartedAt = microtime(true);
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/plant_identify.php';
 
@@ -81,11 +85,12 @@ if (($_POST['detail'] ?? '') === 'full' && $speciesOk) {
     ];
 }
 
-// Hard cap: the whole request (this script's own work included, measured from
-// when it started) must finish within AI_IDENTIFY_MAX_SECONDS. What's left after
+// Hard cap: the server's whole handling of the request (this script's own work
+// included, measured from when the upload had arrived) must finish within
+// AI_IDENTIFY_MAX_SECONDS. What's left after
 // what has already been spent — minus a little for matching the answer against
 // the catalogue afterwards — is the AI's budget, fallback models included.
-$budget = max(1.5, AI_IDENTIFY_MAX_SECONDS - (microtime(true) - ($_SERVER['REQUEST_TIME_FLOAT'] ?? microtime(true))) - 0.4);
+$budget = max(1.5, AI_IDENTIFY_MAX_SECONDS - (microtime(true) - $requestStartedAt) - 0.4);
 $outcome = identifyPlantFromImage((string) file_get_contents($_FILES['image']['tmp_name']), $imageType['mime'], $catalogue, $budget);
 if (!$outcome['ok']) {
     identifyJson(!empty($outcome['timed_out']) ? 504 : 502, ['ok' => false, 'timed_out' => !empty($outcome['timed_out']), 'error' => $outcome['error']]);
