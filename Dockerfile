@@ -49,18 +49,5 @@ COPY docker/vhost.conf.template /etc/apache2/sites-available/000-default.conf
 # it at container start instead of at build time.
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
-# The Railway service currently carries a leftover start command "npm run start"
-# (guessed from package.json, which is only for the Playwright tests) that it
-# applies to every deployment, and it can't be cleared from the CLI. This image
-# is PHP on Apache and has no Node, so container creation failed with "The
-# executable `npm` could not be found". This stand-in makes that command simply
-# start Apache through docker/entrypoint.sh (which sets the port and the MPM;
-# a start command bypasses the ENTRYPOINT, so it must be called explicitly). Once the setting is
-# cleared in the Railway dashboard (Settings > Deploy > Custom Start Command)
-# this can be deleted.
-RUN echo '#!/bin/sh' > /usr/local/bin/npm \
-    && echo 'exec /usr/local/bin/entrypoint.sh apache2-foreground' >> /usr/local/bin/npm \
-    && chmod +x /usr/local/bin/npm
-
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["apache2-foreground"]
