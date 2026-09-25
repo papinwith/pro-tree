@@ -405,12 +405,12 @@ $currentClassificationId = $species['classification_id'] ?? '';
       <button type="button" class="btn-outline btn-sm" data-photo-action="gallery">🖼️ เลือกจากคลังภาพ</button>
     </div>
     <input type="file" id="image" name="image" accept="image/jpeg,image/png,image/gif,image/webp" data-preview-target="image-preview" hidden>
-    <div data-ai-identify-for="image" data-endpoint="identify_tree.php" data-apply-label="ใช้ชื่อนี้กรอกลงฟอร์ม"<?= AI_ENABLED ? '' : ' data-ai-unavailable="1"' ?>>
+    <div data-ai-identify-for="image" data-endpoint="identify_tree.php" data-apply-label="ใช้ข้อมูลนี้กรอกลงฟอร์ม" data-detail="full"<?= AI_ENABLED ? '' : ' data-ai-unavailable="1"' ?>>
       <button type="button" class="btn-outline btn-sm" data-ai-action="identify" disabled>🔍 ให้ AI ช่วยระบุชนิดต้นไม้จากรูปนี้</button>
       <?php if (!AI_ENABLED): ?>
         <p class="field-hint">ต้องตั้งค่า Gemini API key ก่อนจึงจะใช้ได้ — ดูที่หน้า <a href="settings.php#ai-translation">ตั้งค่า</a></p>
       <?php else: ?>
-        <p class="field-hint">ไม่รู้ว่าเป็นต้นอะไร? ถ่ายรูปหรือเลือกรูป แล้วให้ AI เดาชื่อให้ (ตรวจสอบก่อนบันทึกเสมอ)</p>
+        <p class="field-hint">ไม่รู้ว่าเป็นต้นอะไร? ถ่ายรูปหรือเลือกรูป แล้วให้ AI เดาชื่อพร้อมร่างข้อมูลทั้งหมดให้ (วิธีดูแล ลักษณะ คุณสมบัติ ประโยชน์ ข้อควรระวัง ประเภท/ชนิด) ใช้เวลาราวครึ่งนาที และตรวจสอบก่อนบันทึกเสมอ</p>
       <?php endif; ?>
       <div data-ai-output aria-live="polite"></div>
     </div>
@@ -604,8 +604,21 @@ $currentClassificationId = $species['classification_id'] ?? '';
       }
     }
 
+    // Replaces the chosen subtypes (used by the AI-identify "fill the form" button).
+    // Ids tied to a different category than categoryCode are skipped (same rule
+    // filterByCategory applies, and what the server checks on save).
+    function setIds(ids, categoryCode) {
+      selected = ids.filter(function (id) {
+        var meta = metaById[String(id)];
+        return meta && (!categoryCode || !meta.category || meta.category === categoryCode);
+      }).map(function (id) {
+        return { id: String(id), name: metaById[String(id)].name };
+      });
+      render();
+    }
+
     render();
-    return { filterByCategory: filterByCategory };
+    return { filterByCategory: filterByCategory, hasSelection: function () { return selected.length > 0; }, setIds: setIds };
   })();
 
   function filterSubtypesByCategory(categoryCode) {
@@ -729,9 +742,11 @@ $currentClassificationId = $species['classification_id'] ?? '';
 <script src="../public/assets/js/photo-capture-buttons.js"></script>
 <script src="../public/assets/js/ai-identify-button.js"></script>
 <script>
-// "ใช้ชื่อนี้กรอกลงฟอร์ม" from the AI-identify panel: fills the name fields
-// (overwriting — the admin just asked for this), but only fills the
-// description if it's still empty so typed-in text is never clobbered.
+// "ใช้ข้อมูลนี้กรอกลงฟอร์ม" from the AI-identify panel. The names are what the
+// admin just asked to replace, so they're overwritten; the long text fields
+// and the category/subtypes are only filled in when still empty, so text the
+// admin already wrote (or chose) — e.g. when re-running this on an existing
+// species — is never clobbered.
 var aiIdentify = document.querySelector('[data-ai-identify-for="image"]'); // absent when the form is hidden (no subtypes yet)
 if (aiIdentify) aiIdentify.addEventListener('ai-identify:apply', function (e) {
   var r = e.detail.result;
@@ -745,7 +760,19 @@ if (aiIdentify) aiIdentify.addEventListener('ai-identify:apply', function (e) {
   setValue('name_common', r.name_common, false);
   setValue('name_scientific', r.name_scientific, false);
   setValue('description', r.description_th, true);
-  document.getElementById('name').focus();
+  ['care_instructions', 'characteristics', 'properties', 'benefits', 'cautions', 'part_uses'].forEach(function (field) {
+    setValue(field, r[field], true);
+  });
+
+  var category = document.getElementById('category_code');
+  if (r.category_code && category && category.value === '') {
+    category.value = r.category_code;
+    filterSubtypesByCategory(r.category_code);
+  }
+  if (r.subtype_ids && r.subtype_ids.length && !subtypePicker.hasSelection()) {
+    subtypePicker.setIds(r.subtype_ids, category ? category.value : '');
+  }
+  document.getElementById('name').scrollIntoView({ behavior: 'smooth', block: 'center' });
 });
 </script>
 </body>

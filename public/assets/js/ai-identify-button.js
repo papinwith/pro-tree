@@ -11,8 +11,10 @@
 //        data-require-match="1"      optional: only offer "use this" when the AI's
 //        data-no-match-href="..."    answer matches an existing species; otherwise
 //        data-no-match-text="..."    show this link instead
-//        data-ai-unavailable="1">    optional: keep the button disabled (e.g. no
+//        data-ai-unavailable="1"    optional: keep the button disabled (e.g. no
 //                                    API key configured)
+//        data-detail="full">         optional: ask for the full species write-up
+//                                    (care, characteristics, category, ...) too
 //     <button type="button" data-ai-action="identify">...</button>
 //     <div data-ai-output></div>
 //   </div>
@@ -21,6 +23,18 @@
 // the input's data-preview-target points at (the already-saved photo).
 (function () {
   var MAX_SIDE = 1280; // plenty for identification; keeps the upload small
+
+  // Long-form fields the AI drafts when the form asks for the full write-up
+  // (data-detail="full"), shown in this order.
+  var DETAIL_LABELS = [
+    ['description_th', 'คำอธิบาย'],
+    ['care_instructions', 'วิธีดูแล'],
+    ['characteristics', 'ลักษณะ'],
+    ['properties', 'คุณสมบัติ'],
+    ['benefits', 'ประโยชน์'],
+    ['cautions', 'ข้อควรระวัง'],
+    ['part_uses', 'การใช้ประโยชน์แต่ละส่วน']
+  ];
 
   var CONFIDENCE_LABELS = { high: 'มั่นใจสูง', medium: 'มั่นใจปานกลาง', low: 'เดาจากภาพ (มั่นใจต่ำ)' };
 
@@ -108,7 +122,25 @@
       if (result.name_scientific) names.push(result.name_scientific);
       if (names.length) box.appendChild(el('p', 'field-hint', names.join(' · ')));
       box.appendChild(el('p', 'field-hint', 'ความมั่นใจ: ' + (CONFIDENCE_LABELS[result.confidence] || result.confidence)));
-      if (result.description_th) box.appendChild(el('p', '', result.description_th));
+      if (result.category_name || (result.subtype_names && result.subtype_names.length)) {
+        var kinds = [];
+        if (result.category_name) kinds.push('ประเภทพืช: ' + result.category_name);
+        if (result.subtype_names && result.subtype_names.length) kinds.push('ชนิด: ' + result.subtype_names.join(', '));
+        box.appendChild(el('p', '', kinds.join(' · ')));
+      }
+      // Every drafted field, in full — the admin reviews it all here before
+      // deciding to copy it into the form.
+      DETAIL_LABELS.forEach(function (pair) {
+        var text = result[pair[0]];
+        if (!text) return;
+        var section = el('div', 'ai-identify-detail');
+        section.appendChild(el('strong', '', pair[1]));
+        var body = el('p', '', text);
+        body.style.whiteSpace = 'pre-line';
+        body.style.margin = '2px 0 8px';
+        section.appendChild(body);
+        box.appendChild(section);
+      });
       if (result.notes_th) box.appendChild(el('p', 'field-hint', result.notes_th));
       if (result.alternatives && result.alternatives.length) {
         var alts = result.alternatives.map(function (a) {
@@ -161,6 +193,7 @@
           var data = new FormData();
           data.append('csrf_token', tokenField.value);
           data.append('image', blob, 'photo.jpg');
+          if (wrapper.dataset.detail === 'full') data.append('detail', 'full');
           return fetch(wrapper.dataset.endpoint, { method: 'POST', body: data, credentials: 'same-origin' });
         })
         .then(function (response) {

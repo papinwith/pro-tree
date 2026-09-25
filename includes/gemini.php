@@ -47,9 +47,23 @@ function geminiGenerateText(array $body, int $timeoutSeconds, ?string &$error = 
         $curlOpts[CURLOPT_IPRESOLVE] = CURL_IPRESOLVE_V4;
     }
     curl_setopt_array($ch, $curlOpts);
-    $response = curl_exec($ch);
-    $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curlError = curl_error($ch);
+    // Google answers 503 "currently experiencing high demand" in short bursts
+    // (seen for real while testing) — that fails fast and usually clears in a
+    // couple of seconds, so retry those twice before giving up instead of
+    // making the admin click again. Only 503 is retried: anything else is
+    // either a real answer or not going to get better by asking again.
+    $attempt = 0;
+    do {
+        $attempt++;
+        $response = curl_exec($ch);
+        $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
+        $retry = $response !== false && $status === 503 && $attempt < 3;
+        if ($retry) {
+            error_log("Gemini API HTTP 503 (attempt $attempt), retrying");
+            sleep($attempt * 2);
+        }
+    } while ($retry);
     curl_close($ch);
 
     if ($response === false || $curlError) {

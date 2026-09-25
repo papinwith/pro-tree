@@ -46,6 +46,20 @@ function normalizePlantIdentification(array $raw): array
     $claimsPlant = is_scalar($raw['is_plant'] ?? null) && filter_var($raw['is_plant'], FILTER_VALIDATE_BOOLEAN);
     $isPlant = $claimsPlant && ($nameTh !== '' || $nameScientific !== '');
 
+    $detail = [];
+    foreach (plantDetailFields() as $field) {
+        $detail[$field] = $isPlant ? $str($raw[$field] ?? null, 1500) : '';
+    }
+
+    // Only ever meaningful when the caller offered a catalogue to choose from
+    // (see constrainToCatalogue(), which validates these against it).
+    $subtypeIds = [];
+    foreach (is_array($raw['subtype_ids'] ?? null) ? $raw['subtype_ids'] : [] as $sid) {
+        if ((is_int($sid) || (is_string($sid) && ctype_digit($sid))) && (int) $sid > 0) {
+            $subtypeIds[(int) $sid] = (int) $sid;
+        }
+    }
+
     return [
         'is_plant' => $isPlant,
         'name_th' => $isPlant ? $nameTh : '',
@@ -55,38 +69,117 @@ function normalizePlantIdentification(array $raw): array
         'description_th' => $isPlant ? $str($raw['description_th'] ?? null, 1200) : '',
         'notes_th' => $str($raw['notes_th'] ?? null, 600),
         'alternatives' => $isPlant ? $alternatives : [],
-    ];
+        'category_code' => $isPlant ? ($str($raw['category_code'] ?? null, 20) ?: null) : null,
+        'subtype_ids' => $isPlant ? array_slice(array_values($subtypeIds), 0, 3) : [],
+    ] + $detail;
+}
+
+/** The long-form species fields the AI can draft, same keys as the `species` columns. */
+function plantDetailFields(): array
+{
+    return ['care_instructions', 'characteristics', 'properties', 'benefits', 'cautions', 'part_uses'];
 }
 
 /**
- * Sends the photo to Gemini. Returns ['ok' => true, 'result' => <normalized>]
- * or ['ok' => false, 'error' => <Thai message>].
+ * Restricts the AI's category/subtype picks to ones that really exist (it
+ * was only offered the real lists, but nothing guarantees it stuck to them)
+ * and adds display names. A subtype tied to a different category than the
+ * chosen one is dropped, matching what species_form.php would reject on save.
+ * $categories: rows with code, name_th. $subtypes: rows with id, name_th,
+ * category_code (null = not yet assigned to a category).
  */
-function identifyPlantFromImage(string $imageBytes, string $mimeType): array
+function constrainToCatalogue(array $result, array $categories, array $subtypes): array
+{
+    $categoryNames = array_column($categories, 'name_th', 'code');
+    $categoryCode = $result['category_code'] ?? null;
+    if ($categoryCode === null || !isset($categoryNames[$categoryCode])) {
+        $categoryCode = null;
+    }
+
+    $subtypesById = array_column($subtypes, null, 'id');
+    $subtypeIds = [];
+    $subtypeNames = [];
+    foreach ($result['subtype_ids'] ?? [] as $sid) {
+        $st = $subtypesById[$sid] ?? null;
+        if ($st === null) {
+            continue;
+        }
+        if ($st['category_code'] !== null && $categoryCode !== null && $st['category_code'] !== $categoryCode) {
+            continue;
+        }
+        $subtypeIds[] = (int) $sid;
+        $subtypeNames[] = (string) $st['name_th'];
+    }
+
+    $result['category_code'] = $categoryCode;
+    $result['category_name'] = $categoryCode !== null ? (string) $categoryNames[$categoryCode] : null;
+    $result['subtype_ids'] = $subtypeIds;
+    $result['subtype_names'] = $subtypeNames;
+    return $result;
+}
+
+/**
+ * The instruction sent alongside the photo. With $catalogue (['categories' =>
+ * rows with code+name_th, 'subtypes' => rows with id+name_th+category_code])
+ * it asks for the full species write-up too — care, characteristics,
+ * properties, benefits, cautions, per-part uses — and a category/subtype
+ * picked from the catalogue's own lists; without it, just the identification.
+ */
+function buildPlantIdentifyPrompt(?array $catalogue = null): string
 {
     $prompt = "You are a botanist helping a Thai plant nursery catalogue its trees. "
         . "Identify the plant in the attached photo.\n\n"
         . "Rules:\n"
-        . "- Base the answer only on what is actually visible (leaves, flowers, fruit, bark, growth habit). Do not guess wildly; if unsure, say so via a lower confidence.\n"
+        . "- Base the identification only on what is actually visible (leaves, flowers, fruit, bark, growth habit). Do not guess wildly; if unsure, say so via a lower confidence.\n"
         . "- confidence: \"high\" only if the plant is clearly and distinctively identifiable, \"medium\" if likely but similar species exist, \"low\" if it is a best guess.\n"
         . "- If the photo does not show a plant, or the plant cannot be identified at all, set is_plant to false and leave the name fields empty.\n"
         . "- name_th is the common Thai name; name_common is the common English name; name_scientific is the Latin binomial (genus + species, no author).\n"
         . "- description_th: 1-3 Thai sentences describing this plant. notes_th: Thai; what you based the identification on, and if confidence is not high, what extra photo (e.g. close-up of flower, leaf, fruit) would help.\n"
-        . "- alternatives: up to 3 other plausible species when confidence is not high, otherwise an empty array.\n\n"
-        . "Respond with ONLY a JSON object of this exact shape (no markdown fences, no commentary):\n"
-        . '{"is_plant": true, "name_th": "...", "name_common": "...", "name_scientific": "...", "confidence": "high|medium|low", '
-        . '"description_th": "...", "notes_th": "...", "alternatives": [{"name_th": "...", "name_scientific": "..."}]}';
+        . "- alternatives: up to 3 other plausible species when confidence is not high, otherwise an empty array.\n";
 
+    $shape = '"is_plant": true, "name_th": "...", "name_common": "...", "name_scientific": "...", "confidence": "high|medium|low", '
+        . '"description_th": "...", "notes_th": "...", "alternatives": [{"name_th": "...", "name_scientific": "..."}]';
+
+    if ($catalogue !== null) {
+        $categoryLines = [];
+        foreach ($catalogue['categories'] as $cat) {
+            $categoryLines[] = '  ' . $cat['code'] . ' = ' . $cat['name_th'];
+        }
+        $subtypeLines = [];
+        foreach ($catalogue['subtypes'] as $st) {
+            $subtypeLines[] = '  ' . $st['id'] . ' = ' . $st['name_th'];
+        }
+        $prompt .= "- All of these are written in Thai, factual and concise, for a public plant information page, about the identified species in general (not just this one plant): "
+            . "care_instructions (how to grow and look after it: light, water, soil, pruning), characteristics (appearance and growth: height, leaves, flowers, fruit), "
+            . "properties (notable botanical/chemical/practical properties), benefits (uses and benefits), cautions (toxicity, allergens, who should avoid it, pests/invasiveness), "
+            . "part_uses (uses of each part, formatted like \"ดอก: ...; ผล: ...; ลำต้น: ...\"). Use an empty string for anything you do not reliably know — do not invent facts.\n"
+            . "- category_code: pick exactly ONE code from this list that best fits, or null if none fits:\n" . implode("\n", $categoryLines) . "\n"
+            . "- subtype_ids: pick 1-3 ids from this list that fit (an empty array if none fit). Never invent ids or codes outside the lists:\n" . implode("\n", $subtypeLines) . "\n";
+        $shape .= ', "care_instructions": "...", "characteristics": "...", "properties": "...", "benefits": "...", "cautions": "...", "part_uses": "...", '
+            . '"category_code": "code or null", "subtype_ids": [1]';
+    }
+
+    return $prompt . "\nRespond with ONLY a JSON object of this exact shape (no markdown fences, no commentary):\n{" . $shape . '}';
+}
+
+/**
+ * Sends the photo to Gemini. Returns ['ok' => true, 'result' => <normalized>]
+ * or ['ok' => false, 'error' => <Thai message>]. Pass $catalogue (see
+ * buildPlantIdentifyPrompt()) for the full write-up; the category/subtype it
+ * picks are then validated against that same catalogue.
+ */
+function identifyPlantFromImage(string $imageBytes, string $mimeType, ?array $catalogue = null): array
+{
     $error = null;
     $innerText = geminiGenerateText([
         'contents' => [[
             'parts' => [
-                ['text' => $prompt],
+                ['text' => buildPlantIdentifyPrompt($catalogue)],
                 ['inline_data' => ['mime_type' => $mimeType, 'data' => base64_encode($imageBytes)]],
             ],
         ]],
         'generationConfig' => ['response_mime_type' => 'application/json'],
-    ], 60, $error);
+    ], $catalogue !== null ? 90 : 60, $error);
 
     if ($innerText === null) {
         return ['ok' => false, 'error' => $error ?? 'เรียกใช้บริการ AI ไม่สำเร็จ'];
@@ -96,7 +189,11 @@ function identifyPlantFromImage(string $imageBytes, string $mimeType): array
     if (!is_array($raw)) {
         return ['ok' => false, 'error' => 'อ่านผลลัพธ์จาก AI ไม่ได้ กรุณาลองใหม่อีกครั้ง'];
     }
-    return ['ok' => true, 'result' => normalizePlantIdentification($raw)];
+    $result = normalizePlantIdentification($raw);
+    if ($catalogue !== null) {
+        $result = constrainToCatalogue($result, $catalogue['categories'], $catalogue['subtypes']);
+    }
+    return ['ok' => true, 'result' => $result];
 }
 
 /** "Cassia fistula L. 'Alba'" -> "cassia fistula" (genus + species only). */

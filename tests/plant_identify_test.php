@@ -70,6 +70,32 @@ check('normalize: over-long strings are truncated (multibyte-safe), wrong types 
 $n = normalizePlantIdentification([]);
 check('normalize: empty input yields a safe not-identified result', $n['is_plant'] === false && $n['confidence'] === 'low' && $n['alternatives'] === []);
 
+$n = normalizePlantIdentification([
+    'is_plant' => true, 'name_th' => 'x', 'care_instructions' => "  รดน้ำวันละครั้ง  ", 'characteristics' => str_repeat('ข', 5000),
+    'properties' => ['not a string'], 'benefits' => 'ร่มเงา', 'cautions' => null, 'part_uses' => 'ดอก: ชา',
+    'category_code' => ' 01 ', 'subtype_ids' => ['1', 2, 2, 'x', -1, 0, '3', 4, 1.5, ['9']],
+]);
+check('normalize: long-form fields are trimmed, truncated to 1500, wrong types become empty',
+    $n['care_instructions'] === 'รดน้ำวันละครั้ง' && mb_strlen($n['characteristics']) === 1500 && $n['properties'] === '' && $n['cautions'] === '' && $n['part_uses'] === 'ดอก: ชา');
+check('normalize: category_code trimmed; subtype_ids keep only positive ints, de-duplicated, max 3', $n['category_code'] === '01' && $n['subtype_ids'] === [1, 2, 3], json_encode($n['subtype_ids']));
+$n = normalizePlantIdentification(['is_plant' => false, 'care_instructions' => 'ทิ้ง', 'category_code' => '01', 'subtype_ids' => [1]]);
+check('normalize: not-a-plant clears the long-form fields, category and subtypes too',
+    $n['care_instructions'] === '' && $n['category_code'] === null && $n['subtype_ids'] === []);
+
+$cats = [['code' => '01', 'name_th' => 'ไม้ผล'], ['code' => '02', 'name_th' => 'ไม้ดอก']];
+$subs = [['id' => 1, 'name_th' => 'ไม้ผลกินได้', 'category_code' => '01'], ['id' => 2, 'name_th' => 'ไม้ดอกหอม', 'category_code' => '02'], ['id' => 3, 'name_th' => 'ยังไม่จัดประเภท', 'category_code' => null]];
+$c = constrainToCatalogue(['category_code' => '01', 'subtype_ids' => [1, 2, 3, 99]], $cats, $subs);
+check('constrain: keeps a real category, drops subtypes that do not exist or belong to another category, keeps unassigned ones',
+    $c['category_code'] === '01' && $c['category_name'] === 'ไม้ผล' && $c['subtype_ids'] === [1, 3] && $c['subtype_names'] === ['ไม้ผลกินได้', 'ยังไม่จัดประเภท'], json_encode($c, JSON_UNESCAPED_UNICODE));
+$c = constrainToCatalogue(['category_code' => '99', 'subtype_ids' => [1, 2]], $cats, $subs);
+check('constrain: an invented category code is dropped (category_name null); subtypes then only need to exist',
+    $c['category_code'] === null && $c['category_name'] === null && $c['subtype_ids'] === [1, 2]);
+
+$briefPrompt = buildPlantIdentifyPrompt();
+$fullPrompt = buildPlantIdentifyPrompt(['categories' => $cats, 'subtypes' => $subs]);
+check('prompt: brief mode asks for the identification only', !str_contains($briefPrompt, 'care_instructions') && !str_contains($briefPrompt, 'category_code'));
+check('prompt: full mode asks for every long-form field and lists the real categories/subtypes to choose from',
+    str_contains($fullPrompt, 'care_instructions') && str_contains($fullPrompt, 'part_uses') && str_contains($fullPrompt, '01 = ไม้ผล') && str_contains($fullPrompt, '3 = ยังไม่จัดประเภท'));
 check('scientificNameKey: genus + species only, case/author/cultivar-insensitive',
     scientificNameKey("  Cassia FISTULA L. 'Alba' ") === 'cassia fistula' && scientificNameKey('Ficus') === 'ficus' && scientificNameKey('') === '');
 
@@ -141,13 +167,16 @@ PHP);
 
 function startServer(string $cmd, string $host, int $port, array $env = []): mixed
 {
-    $proc = proc_open($cmd, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, __DIR__, array_merge(getenv(), $env), ['bypass_shell' => true]);
+    // Server output goes to the null device, NOT a pipe: php -S logs every request
+    // (and error_log() lines) to stderr, and a pipe nobody reads fills up after a few
+    // KB — at which point the server blocks on its next write and every later request
+    // hangs until curl times out.
+    $null = PHP_OS_FAMILY === 'Windows' ? 'NUL' : '/dev/null';
+    $proc = proc_open($cmd, [1 => ['file', $null, 'w'], 2 => ['file', $null, 'w']], $pipes, __DIR__, array_merge(getenv(), $env), ['bypass_shell' => true]);
     if (!is_resource($proc)) {
         fwrite(STDERR, "Could not start server: $cmd\n");
         exit(1);
     }
-    stream_set_blocking($pipes[1], false);
-    stream_set_blocking($pipes[2], false);
     for ($i = 0; $i < 40; $i++) {
         $conn = @fsockopen($host, $port, $errno, $errstr, 0.25);
         if ($conn) {
@@ -169,9 +198,9 @@ $appProc = startServer(
     "$php -S $host:$appPort -t " . escapeshellarg(__DIR__ . '/..'),
     $host,
     $appPort,
-    // 6 identify calls/hour/admin: exactly the number of calls that reach the
+    // 8 identify calls/hour/admin: exactly the number of calls that reach the
     // mock below, so the next one exercises the rate limit.
-    ['GEMINI_API_KEY' => 'test-key-123', 'GEMINI_API_BASE' => "http://$host:$mockPort", 'AI_IDENTIFY_MAX_PER_HOUR' => '6']
+    ['GEMINI_API_KEY' => 'test-key-123', 'GEMINI_API_BASE' => "http://$host:$mockPort", 'AI_IDENTIFY_MAX_PER_HOUR' => '8']
 );
 // More app instances, each configured for one specific path:
 //  - no API key ("AI not configured")
@@ -351,6 +380,60 @@ try {
     check('a photo that is not a plant -> 200 with is_plant=false and the AI note',
         $r['status'] === 200 && ($r['json']['result']['is_plant'] ?? true) === false && ($r['json']['result']['notes_th'] ?? '') === 'เป็นรูปโต๊ะ' && array_key_exists('matched_species_id', $r['json']['result'] ?? []) && $r['json']['result']['matched_species_id'] === null, $r['body']);
 
+    // brief request (tree form style): the prompt must not ask for the long write-up.
+    // The last call the mock saw was the "not a plant" one above, made without detail=full.
+    $sentBrief = json_decode((string) @file_get_contents($mockLogFile), true) ?: [];
+    $briefText = '';
+    foreach ($sentBrief['body']['contents'][0]['parts'] ?? [] as $p) {
+        $briefText .= $p['text'] ?? '';
+    }
+    check('a normal request does not ask Gemini for the long write-up (cheaper, faster)', $briefText !== '' && !str_contains($briefText, 'care_instructions'));
+
+    // full request (species form): every field, and category/subtypes limited to real ones
+    $realCats = getAllCategories($pdo);
+    $realSubs = getAllSubtypes($pdo);
+    if ($realCats && $realSubs) {
+        $catCode = $realCats[0]['code'];
+        $subOk = null;
+        foreach ($realSubs as $s) {
+            if ($s['category_code'] === null || $s['category_code'] === $catCode) {
+                $subOk = $s;
+                break;
+            }
+        }
+        file_put_contents($mockResponseFile, json_encode([
+            'is_plant' => true, 'name_th' => 'ต้นทดสอบ', 'name_common' => 'Test tree', 'name_scientific' => 'Testus fullus', 'confidence' => 'medium',
+            'description_th' => 'อธิบาย', 'care_instructions' => 'ดูแลอย่างนี้', 'characteristics' => 'ลักษณะอย่างนี้', 'properties' => 'คุณสมบัติ',
+            'benefits' => 'ประโยชน์', 'cautions' => 'ระวัง', 'part_uses' => 'ดอก: ชา', 'category_code' => $catCode,
+            'subtype_ids' => array_values(array_filter([$subOk['id'] ?? null, 999999])), 'alternatives' => [],
+        ], JSON_UNESCAPED_UNICODE));
+        $r = request($endpoint, $admin['cookie'], ['image' => $photo(), 'csrf_token' => $admin['csrf'], 'detail' => 'full'], true);
+        $res = $r['json']['result'] ?? [];
+        check('detail=full returns all the long-form fields', $r['status'] === 200
+            && ($res['care_instructions'] ?? '') === 'ดูแลอย่างนี้' && ($res['characteristics'] ?? '') === 'ลักษณะอย่างนี้' && ($res['properties'] ?? '') === 'คุณสมบัติ'
+            && ($res['benefits'] ?? '') === 'ประโยชน์' && ($res['cautions'] ?? '') === 'ระวัง' && ($res['part_uses'] ?? '') === 'ดอก: ชา', $r['body']);
+        check('detail=full: the category is resolved to its real name and the invented subtype id is dropped',
+            ($res['category_code'] ?? null) === $catCode && ($res['category_name'] ?? null) === $realCats[0]['name_th']
+            && !in_array(999999, $res['subtype_ids'] ?? [], true) && (($subOk === null) || in_array((int) $subOk['id'], $res['subtype_ids'] ?? [], true)), $r['body']);
+        $sentFull = json_decode((string) @file_get_contents($mockLogFile), true) ?: [];
+        $fullText = '';
+        foreach ($sentFull['body']['contents'][0]['parts'] ?? [] as $p) {
+            $fullText .= $p['text'] ?? '';
+        }
+        check('detail=full: the prompt offers the real category list from the database',
+            str_contains($fullText, $catCode . ' = ' . $realCats[0]['name_th']) && str_contains($fullText, 'care_instructions'));
+
+        file_put_contents($mockResponseFile, json_encode(['is_plant' => true, 'name_th' => 'ต้นทดสอบ', 'category_code' => 'ZZZ', 'subtype_ids' => [999998]], JSON_UNESCAPED_UNICODE));
+        $r = request($endpoint, $admin['cookie'], ['image' => $photo(), 'csrf_token' => $admin['csrf'], 'detail' => 'full'], true);
+        $res = $r['json']['result'] ?? [];
+        check('detail=full: an invented category code / subtype id never reaches the browser',
+            $r['status'] === 200 && array_key_exists('category_code', $res) && $res['category_code'] === null && ($res['subtype_ids'] ?? 'x') === [], $r['body']);
+    } else {
+        echo "SKIP  no categories/subtypes in the DB to test the full write-up against.\n";
+        // keep the number of calls that reach the mock at 8 so the quota check below still lines up
+        request($endpoint, $admin['cookie'], ['image' => $photo(), 'csrf_token' => $admin['csrf']], true);
+        request($endpoint, $admin['cookie'], ['image' => $photo(), 'csrf_token' => $admin['csrf']], true);
+    }
     // failure modes -> a clean JSON error, never a PHP error
     file_put_contents($mockResponseFile, 'this is not json at all');
     $r = request($endpoint, $admin['cookie'], ['image' => $photo(), 'csrf_token' => $admin['csrf']], true);
@@ -369,7 +452,7 @@ try {
         $r['status'] === 502 && str_contains($r['json']['error'] ?? '', 'โควตา') && !str_contains($r['body'], 'mock failure'), "got {$r['status']}: {$r['body']}");
     file_put_contents($mockStatusFile, '200');
 
-    // Six calls have now reached the mock (limit is 6/hour): the seventh is
+    // Eight calls have now reached the mock (limit is 8/hour): the seventh is
     // refused locally, before it can cost anything.
     @unlink($mockLogFile);
     $r = request($endpoint, $admin['cookie'], ['image' => $photo(), 'csrf_token' => $admin['csrf']], true);
@@ -381,6 +464,9 @@ try {
         check("$formPage renders the AI-identify button and loads its script, with the key configured",
             $page['status'] === 200 && str_contains($page['body'], 'data-ai-identify-for="image"') && str_contains($page['body'], 'ai-identify-button.js') && !str_contains($page['body'], 'data-ai-unavailable'), "got {$page['status']}");
     }
+    $page = request("$app/admin/species_form.php", $admin['cookie']);
+    check('species_form.php asks for the full write-up; tree_form.php does not',
+        str_contains($page['body'], 'data-detail="full"') && !str_contains(request("$app/admin/tree_form.php", $admin['cookie'])['body'], 'data-detail="full"'));
     $page = request("http://$host:$noKeyPort/admin/species_form.php", $noKeyAdmin['cookie']);
     if (!AI_ENABLED) {
         check('species_form.php with no API key marks the button unavailable and explains why', str_contains($page['body'], 'data-ai-unavailable="1"') && str_contains($page['body'], 'Gemini API key'));

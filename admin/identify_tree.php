@@ -25,7 +25,8 @@ if (!adminLoggedIn()) {
 }
 // Same people who can add/edit a species or a tree — the two forms this
 // button lives on.
-if (!can('species.manage') && !can('tree.create') && !can('tree.update')) {
+$canManageSpecies = can('species.manage');
+if (!$canManageSpecies && !can('tree.create') && !can('tree.update')) {
     identifyJson(403, ['ok' => false, 'error' => 'บทบาทของคุณไม่มีสิทธิ์ใช้งานส่วนนี้']);
 }
 // A body over post_max_size makes PHP drop $_POST and $_FILES entirely, which
@@ -61,7 +62,17 @@ if (!consumeIdentifyQuota((int) $_SESSION['admin_id'])) {
 // tab, saving the form) queues behind it.
 session_write_close();
 
-$outcome = identifyPlantFromImage((string) file_get_contents($_FILES['image']['tmp_name']), $imageType['mime']);
+// The species form asks for the full write-up (care, characteristics, ...
+// plus a category/subtype picked from the real lists) — only for someone who
+// can actually create/edit species; the tree form just wants the name.
+$catalogue = null;
+if (($_POST['detail'] ?? '') === 'full' && $canManageSpecies) {
+    $catalogue = ['categories' => getAllCategories(db()), 'subtypes' => getAllSubtypes(db())];
+}
+
+// The full write-up is a much longer answer; the API call alone can take up to 90s.
+set_time_limit(120);
+$outcome = identifyPlantFromImage((string) file_get_contents($_FILES['image']['tmp_name']), $imageType['mime'], $catalogue);
 if (!$outcome['ok']) {
     identifyJson(502, ['ok' => false, 'error' => $outcome['error']]);
 }
