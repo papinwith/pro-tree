@@ -24,4 +24,25 @@ if [ ! -e /etc/apache2/mods-enabled/mpm_prefork.load ]; then
     ln -s ../mods-available/mpm_prefork.conf /etc/apache2/mods-enabled/mpm_prefork.conf
 fi
 
+# Uploads folder: on Railway a persistent volume is mounted here (see the
+# Dockerfile). A fresh volume is empty and owned by root, so Apache
+# (www-data) couldn't save photos into it. Recreate the subfolders, put back
+# any seed image the volume doesn't have yet (never overwriting an existing
+# file), and hand the folder to www-data. Harmless with no volume mounted.
+UPLOADS=/var/www/html/public/assets/uploads
+SEED=/usr/local/share/uploads-seed
+for dir in tree species maps logo qr; do
+    mkdir -p "$UPLOADS/$dir"
+done
+if [ -d "$SEED" ]; then
+    (cd "$SEED" && find . -type f) | while IFS= read -r file; do
+        if [ ! -e "$UPLOADS/$file" ]; then
+            mkdir -p "$(dirname "$UPLOADS/$file")"
+            cp -p "$SEED/$file" "$UPLOADS/$file"
+        fi
+    done
+fi
+chown -R www-data:www-data "$UPLOADS"
+chmod -R u+rwX,g+rwX "$UPLOADS"
+
 exec "$@"

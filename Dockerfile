@@ -1,8 +1,6 @@
 # Plain PHP app (no framework) — this just gives it a PHP+Apache runtime
 # with the extensions it needs (pdo_pgsql for Supabase, gd for the vendored
-# QR library), for hosts that only support Docker deploys (e.g. Render)
-# rather than auto-detecting PHP directly (e.g. Railway, which needs no
-# Dockerfile).
+# QR library). Railway builds from this file (pinned in railway.json).
 FROM php:8.2-apache
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -27,6 +25,12 @@ RUN a2enmod rewrite expires deflate
 COPY . /var/www/html/
 RUN chown -R www-data:www-data /var/www/html \
     && chmod -R 775 /var/www/html/public/assets/uploads
+
+# Uploaded photos must live on a persistent volume mounted at
+# public/assets/uploads (the container's own disk is wiped on every
+# redeploy). A mounted volume hides whatever the image had in that folder,
+# so keep a copy of the committed seed images for entrypoint.sh to put back.
+RUN cp -a /var/www/html/public/assets/uploads /usr/local/share/uploads-seed
 
 # public/.htaccess needs AllowOverride On for its pretty-URL rewrite rule.
 RUN { \
