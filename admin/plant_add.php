@@ -578,5 +578,6 @@ $selectedSubtypeIds = $form['subtype_ids'] ?? [];
 <script src="../public/assets/js/ai-identify-button.js"></script>
 <script src="../public/assets/js/geolocate-button.js"></script>
 <script src="../public/assets/js/photo-capture-buttons.js"></script>
+<script src="../public/assets/js/photo-shrink.js"></script>
 </body>
 </html>

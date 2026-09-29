@@ -179,6 +179,13 @@ function csrfField(): string
 function requireCsrf(): void
 {
     startAdminSession();
+    // A body over post_max_size makes PHP drop $_POST and $_FILES entirely —
+    // the token is missing too, so say what actually went wrong.
+    if (empty($_POST) && empty($_FILES) && (int) ($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) {
+        http_response_code(413);
+        echo 'ไฟล์ที่แนบมีขนาดใหญ่เกินไป (รูปละไม่เกิน 10 MB) กรุณาย้อนกลับแล้วเลือกรูปที่เล็กลง';
+        exit;
+    }
     $submitted = $_POST['csrf_token'] ?? '';
     if (!is_string($submitted) || empty($_SESSION['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $submitted)) {
         http_response_code(400);

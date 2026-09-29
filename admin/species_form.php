@@ -780,5 +780,6 @@ if (aiIdentify) aiIdentify.addEventListener('ai-identify:apply', function (e) {
   document.getElementById('name').scrollIntoView({ behavior: 'smooth', block: 'center' });
 });
 </script>
+<script src="../public/assets/js/photo-shrink.js"></script>
 </body>
 </html>

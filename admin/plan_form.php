@@ -239,5 +239,6 @@ $v = fn($key, $default = '') => e((string) ($plan[$key] ?? $default));
 </div>
 <script src="../public/assets/js/map-pin-picker.js"></script>
 <script src="../public/assets/js/image-preview.js"></script>
+<script src="../public/assets/js/photo-shrink.js"></script>
 </body>
 </html>

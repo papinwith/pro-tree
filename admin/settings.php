@@ -143,5 +143,6 @@ $openingHours = $errors ? ($openingHours ?? '') : getSetting($pdo, 'opening_hour
     <p class="field-hint muted-note"><code>config/local.php</code> อยู่ใน <code>.gitignore</code> แล้ว จะไม่ถูกคอมมิตเข้า git โดยไม่ตั้งใจ</p>
   </section>
 </div>
+<script src="../public/assets/js/photo-shrink.js"></script>
 </body>
 </html>
