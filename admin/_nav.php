@@ -34,6 +34,11 @@ $navGroups = [
 <nav class="admin-nav">
   <a class="btn-outline btn-sm" href="<?= e(adminHomeUrl()) ?>">หน้าแรก</a>
 
+  <?php // One page adds a species and/or its trees in a single save (plant_add.php). ?>
+  <?php if (canAny(['tree.create', 'species.manage'])): ?>
+    <a class="btn btn-sm" href="plant_add.php">+ เพิ่มต้นไม้ / ชนิดพันธุ์</a>
+  <?php endif; ?>
+
   <?php foreach ($navGroups as $groupLabel => $links): if (!$links) continue; ?>
     <details class="admin-nav-group">
       <summary class="btn-outline btn-sm"><?= e($groupLabel) ?></summary>

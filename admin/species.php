@@ -29,7 +29,6 @@ $speciesList = $pdo->query(
   </div>
 
   <div class="btn-row">
-    <a class="btn" href="species_form.php">+ เพิ่มชนิดพันธุ์</a>
     <form id="bulkDeleteSpecies" class="inline" method="post" action="species_bulk_delete.php" data-confirm="ลบชนิดพันธุ์ที่เลือกทั้งหมดใช่หรือไม่? (รายการที่ยังมีต้นไม้ แผนปลูก หรือประวัติการขายผูกอยู่จะถูกข้าม — ถ้าต้องการลบรายการเหล่านั้น ให้ใช้ปุ่ม ‘ย้ายแล้วลบ’ ที่แถวของแต่ละรายการ)">
       <?= csrfField() ?>
       <button class="btn btn-sm btn-danger" type="submit" data-bulk-submit="species" disabled>ลบที่เลือก</button>

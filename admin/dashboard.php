@@ -96,7 +96,6 @@ $pageUrl = fn(int $p) => '?' . http_build_query(array_filter(
   <?php endif; ?>
 
   <div class="btn-row">
-    <a class="btn" href="tree_form.php">+ เพิ่มต้นไม้</a>
     <a class="btn" href="qr_all.php">พิมพ์ QR Code ทั้งหมด</a>
     <form id="bulkDeleteTrees" class="inline" method="post" action="tree_bulk_delete.php" data-confirm="ลบต้นไม้ที่เลือกทั้งหมดใช่หรือไม่?">
       <?= csrfField() ?>

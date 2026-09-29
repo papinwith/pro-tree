@@ -10,7 +10,10 @@
 //        data-apply-label="..."      label of the "use this" button
 //        data-require-match="1"      optional: only offer "use this" when the AI's
 //        data-no-match-href="..."    answer matches an existing species; otherwise
-//        data-no-match-text="..."    show this link instead
+//        data-no-match-text="..."    show this link (data-no-match-href) and/or this
+//        data-no-match-create-label  button (fires ai-identify:apply same as a match —
+//        "..."                       the host page decides what "no match" means, e.g.
+//                                     switching to an inline "create new species" form)
 //        data-ai-unavailable="1"    optional: keep the button disabled (e.g. no
 //                                    API key configured)
 //        data-detail="full">         optional: ask for the full species write-up
@@ -162,6 +165,14 @@
           note.appendChild(link);
         }
         box.appendChild(note);
+        if (wrapper.dataset.noMatchCreateLabel) {
+          var createBtn = el('button', 'btn btn-sm', wrapper.dataset.noMatchCreateLabel);
+          createBtn.type = 'button';
+          createBtn.addEventListener('click', function () {
+            wrapper.dispatchEvent(new CustomEvent('ai-identify:apply', { bubbles: true, detail: { result: result } }));
+          });
+          box.appendChild(createBtn);
+        }
       } else {
         var apply = el('button', 'btn btn-sm', wrapper.dataset.applyLabel || 'ใช้ผลนี้');
         apply.type = 'button';

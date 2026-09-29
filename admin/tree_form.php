@@ -23,10 +23,16 @@ $speciesList = getAllSpecies($pdo);
 $categoriesByCode = array_column(getAllCategories($pdo), null, 'code');
 $subtypes = getAllSubtypes($pdo);
 $subtypesById = array_column($subtypes, null, 'id');
+// Same permission species_form.php requires — gates the "+ เพิ่มชนิดพันธุ์ใหม่"
+// option below, so this page can create a species row only for an admin who
+// could do that from species_form.php anyway.
+$canManageSpecies = can('species.manage');
 require_once __DIR__ . '/../includes/plant_identify.php';
 // Hand the AI-identify button what this page just loaded (see warmIdentifyRequest()).
-// This form only needs the tree permissions, so no species-write-up rights are implied.
-warmIdentifyRequest(false, null, null, $speciesList);
+// Categories/subtypes are only needed when this admin can also create a new
+// species inline (below) — that's the only case identify_tree.php's "full"
+// detail mode is used from this page.
+warmIdentifyRequest($canManageSpecies, $canManageSpecies ? array_values($categoriesByCode) : null, $canManageSpecies ? $subtypes : null, $speciesList);
 $zones = getAllZones($pdo);
 $mapImage = getSetting($pdo, 'default_map_image', '');
 $mapImageUrl = $mapImage ? resolveAssetUrl($mapImage, '../public') : '';
@@ -37,7 +43,49 @@ $maintenanceLogs = $id ? getMaintenanceLogsForTree($pdo, $id) : [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     requireCsrf();
-    $speciesId = (int) ($_POST['species_id'] ?? 0);
+
+    // "+ เพิ่มชนิดพันธุ์ใหม่" from the species dropdown: validate the inline
+    // fields now (cheap, no writes yet) — the species row itself is created
+    // together with the tree(s) further down, in the same transaction, using
+    // the same rules species_form.php's create path uses (a real subtype and
+    // category; species_code is assigned automatically). Gated on
+    // species.manage so posting this value directly can't create a species
+    // row without that permission — a tampered form falls through to the
+    // ordinary "invalid species" error below instead.
+    $newSpeciesMode = $canManageSpecies && ($_POST['species_id'] ?? '') === 'new';
+    $newSpeciesName = $newSpeciesCategoryCode = $newSpeciesNameCommon = $newSpeciesNameScientific = $newSpeciesDescription = '';
+    $newSpeciesSubtypeId = 0;
+    $newSubtype = null;
+    if ($newSpeciesMode) {
+        $newSpeciesName = trim($_POST['new_species_name'] ?? '');
+        $newSpeciesCategoryCode = trim($_POST['new_species_category_code'] ?? '');
+        $newSpeciesSubtypeId = (int) ($_POST['new_species_subtype_id'] ?? 0);
+        $newSpeciesNameCommon = trim($_POST['new_species_name_common'] ?? '');
+        $newSpeciesNameScientific = trim($_POST['new_species_name_scientific'] ?? '');
+        $newSpeciesDescription = trim($_POST['new_species_description'] ?? '');
+        $newSubtype = $newSpeciesSubtypeId ? getSubtypeById($pdo, $newSpeciesSubtypeId) : null;
+
+        if ($newSpeciesName === '') {
+            $errors[] = 'กรุณาระบุชื่อชนิดพันธุ์ใหม่';
+        }
+        if (!getCategoryByCode($pdo, $newSpeciesCategoryCode)) {
+            $errors[] = 'กรุณาเลือกประเภทพืชของชนิดพันธุ์ใหม่ให้ถูกต้อง';
+        }
+        if (!$newSubtype) {
+            $errors[] = 'กรุณาเลือกชนิดของชนิดพันธุ์ใหม่ให้ถูกต้อง';
+        } elseif ($newSubtype['category_code'] !== null && $newSubtype['category_code'] !== $newSpeciesCategoryCode) {
+            // Shouldn't happen via the UI (filtered the same way species_form.php
+            // filters it) — only reachable by tampering with the form.
+            $errors[] = 'ชนิดที่เลือกไม่ตรงกับประเภทพืชของชนิดพันธุ์ใหม่';
+        }
+        $speciesId = 0; // resolved once the species row is actually created below
+    } else {
+        $speciesId = (int) ($_POST['species_id'] ?? 0);
+        if (!$speciesId || !getSpeciesById($pdo, $speciesId)) {
+            $errors[] = 'กรุณาเลือกชนิดพันธุ์ให้ถูกต้อง';
+        }
+    }
+
     $zoneId = (int) ($_POST['zone_id'] ?? 0);
     $status = $_POST['status'] ?? 'healthy';
     $mapUrlInput = trim($_POST['map_url'] ?? '');
@@ -80,9 +128,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // same as the bulk-add feature on the species form.
     $quantity = $id ? 1 : max(1, min(200, (int) ($_POST['quantity'] ?? 1)));
 
-    if (!$speciesId || !getSpeciesById($pdo, $speciesId)) {
-        $errors[] = 'กรุณาเลือกชนิดพันธุ์ให้ถูกต้อง';
-    }
     if (!$zoneId || !getZoneById($pdo, $zoneId)) {
         $errors[] = 'กรุณาเลือกโซนให้ถูกต้อง';
     }
@@ -125,18 +170,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ? date('Y-m-d H:i:s')
             : ($tree['location_updated_at'] ?? null);
 
-        $params = [
-            'species_id' => $speciesId, 'zone_id' => $zoneId, 'area_code' => $areaCode, 'label' => $label, 'status' => $status,
-            'slug' => $slug,
-            'image_path' => $imagePath, 'map_image_path' => $mapImagePath, 'map_url' => $mapUrl,
-            'latitude' => $latitude, 'longitude' => $longitude, 'location_updated_at' => $locationUpdatedAt,
-            'map_pin_x' => $mapPinX, 'map_pin_y' => $mapPinY,
-            'is_active' => $isActive,
-        ];
-
         $treeIds = [];
         $codeChanged = false;
+        $createdQrPaths = [];
+        // One transaction for the whole save: the new species row (if any),
+        // the tree row(s), and the QR/plant_code work either all land or none
+        // do — a failure partway (e.g. a duplicate species code) used to be
+        // able to leave a half-created species with no tree behind.
+        $pdo->beginTransaction();
         try {
+            if ($newSpeciesMode) {
+                $newSpeciesCode = nextSpeciesCode($pdo, $newSpeciesCategoryCode);
+                $insertSpecies = $pdo->prepare(
+                    'INSERT INTO species (category_code, subtype_id, species_code, name, name_common, name_scientific, description)
+                     VALUES (:category_code, :subtype_id, :species_code, :name, :name_common, :name_scientific, :description)'
+                );
+                $insertSpecies->execute([
+                    'category_code' => $newSpeciesCategoryCode, 'subtype_id' => $newSpeciesSubtypeId, 'species_code' => $newSpeciesCode,
+                    'name' => $newSpeciesName, 'name_common' => $newSpeciesNameCommon !== '' ? $newSpeciesNameCommon : null,
+                    'name_scientific' => $newSpeciesNameScientific !== '' ? $newSpeciesNameScientific : null,
+                    'description' => $newSpeciesDescription !== '' ? $newSpeciesDescription : null,
+                ]);
+                $speciesId = (int) $pdo->lastInsertId();
+                // First time this subtype is actually used for a species — link
+                // it to the chosen category permanently (subtype_form.php's
+                // "เพิ่มชนิด" never asks for one), same as species_form.php does.
+                if ($newSubtype['category_code'] === null) {
+                    $pdo->prepare('UPDATE subtypes SET category_code = :cc WHERE id = :id')
+                        ->execute(['cc' => $newSpeciesCategoryCode, 'id' => $newSpeciesSubtypeId]);
+                }
+            }
+
+            $params = [
+                'species_id' => $speciesId, 'zone_id' => $zoneId, 'area_code' => $areaCode, 'label' => $label, 'status' => $status,
+                'slug' => $slug,
+                'image_path' => $imagePath, 'map_image_path' => $mapImagePath, 'map_url' => $mapUrl,
+                'latitude' => $latitude, 'longitude' => $longitude, 'location_updated_at' => $locationUpdatedAt,
+                'map_pin_x' => $mapPinX, 'map_pin_y' => $mapPinY,
+                'is_active' => $isActive,
+            ];
+
             if ($id) {
                 $stmt = $pdo->prepare(
                     'UPDATE trees SET species_id=:species_id, zone_id=:zone_id, area_code=:area_code, label=:label, status=:status,
@@ -168,17 +241,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $treeIds[] = $newTreeId;
 
                     $qrCodePath = generateTreeQrCode($newTreeId);
+                    $createdQrPaths[] = $qrCodePath;
                     $pdo->prepare('UPDATE trees SET qr_code_path = :qr WHERE id = :id')
                         ->execute(['qr' => $qrCodePath, 'id' => $newTreeId]);
                     $codeChanged = recomputeTreePlantCode($pdo, $newTreeId) || $codeChanged;
                 }
             }
+            $pdo->commit();
         } catch (PDOException $e) {
             // Someone else (or another tab) saved a conflicting row between
             // our validation check above and this write — don't crash,
-            // discard whatever we just uploaded, and ask the admin to retry.
+            // discard whatever we just uploaded/created, and ask the admin to retry.
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
             deletePublicFile($newImagePath);
             deletePublicFile($newMapImagePath);
+            foreach ($createdQrPaths as $orphanQr) {
+                deletePublicFile($orphanQr);
+            }
             if ($e->getCode() === '23000') {
                 $errors[] = 'ข้อมูลนี้เพิ่งถูกใช้โดยการบันทึกอื่น กรุณาตรวจสอบและลองใหม่อีกครั้ง';
             } else {
@@ -214,10 +295,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     // keep entered values on validation error
     $tree = array_merge($tree ?? [], [
-        'species_id' => $speciesId, 'zone_id' => $zoneId, 'area_code' => $areaCode, 'label' => $label, 'status' => $status,
+        'species_id' => $newSpeciesMode ? 'new' : $speciesId, 'zone_id' => $zoneId, 'area_code' => $areaCode, 'label' => $label, 'status' => $status,
         'slug' => $slug, 'map_url' => $mapUrlInput, 'is_active' => $isActive,
         'latitude' => $latitude, 'longitude' => $longitude, 'quantity' => $quantity,
         'map_pin_x' => $mapPinX, 'map_pin_y' => $mapPinY,
+        'new_species_name' => $newSpeciesName, 'new_species_category_code' => $newSpeciesCategoryCode,
+        'new_species_subtype_id' => $newSpeciesSubtypeId, 'new_species_name_common' => $newSpeciesNameCommon,
+        'new_species_name_scientific' => $newSpeciesNameScientific, 'new_species_description' => $newSpeciesDescription,
     ]);
 }
 
@@ -252,8 +336,8 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
     <div class="flash error"><?= e($err) ?></div>
   <?php endforeach; ?>
 
-  <?php if (!$speciesList): ?>
-    <div class="flash error">ยังไม่มีชื่อต้นไม้ในระบบ กรุณา<a href="species_form.php">เพิ่มชื่อต้นไม้</a>ก่อน</div>
+  <?php if (!$speciesList && !$canManageSpecies): ?>
+    <div class="flash error">ยังไม่มีชื่อต้นไม้ในระบบ กรุณาติดต่อผู้ดูแลที่มีสิทธิ์เพิ่มชนิดพันธุ์</div>
   <?php elseif (!$zones): ?>
     <div class="flash error">ยังไม่มีโซนในระบบ กรุณา<a href="zone_form.php">เพิ่มโซน</a>ก่อน</div>
   <?php else: ?>
@@ -282,8 +366,11 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
     <input type="search" id="species_search" placeholder="พิมพ์ค้นหาชื่อต้นไม้..." oninput="filterSpecies()">
 
     <label for="species_id">ชื่อต้นไม้</label>
-    <select id="species_id" name="species_id" required onchange="updateSpeciesDetails(this.value)">
+    <select id="species_id" name="species_id" required onchange="updateSpeciesDetails(this.value); toggleNewSpeciesPanel();">
       <option value="">— เลือกชื่อต้นไม้ —</option>
+      <?php if ($canManageSpecies): ?>
+        <option value="new" <?= ($tree['species_id'] ?? '') === 'new' ? 'selected' : '' ?>>+ เพิ่มชนิดพันธุ์ใหม่ (สร้างตอนนี้เลย)</option>
+      <?php endif; ?>
       <?php foreach ($speciesList as $sp): ?>
         <option value="<?= (int) $sp['id'] ?>" <?= (int) ($tree['species_id'] ?? 0) === (int) $sp['id'] ? 'selected' : '' ?>
           data-category="<?= e($sp['category_code']) ?>"
@@ -309,7 +396,46 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
       <p><strong>ประโยชน์:</strong> <span data-out="benefits"></span></p>
       <p><strong>ข้อควรระวัง:</strong> <span data-out="cautions"></span></p>
     </div>
-    <p class="field-hint">แก้ไขรายละเอียดได้ที่ — <a href="species.php">จัดการชื่อต้นไม้</a></p>
+
+    <?php if ($canManageSpecies): ?>
+    <div id="new-species-panel" class="history-section" style="display:none">
+      <h2>ข้อมูลชนิดพันธุ์ใหม่</h2>
+      <label for="new_species_category_code">ประเภทพืช</label>
+      <select id="new_species_category_code" name="new_species_category_code" onchange="filterNewSpeciesSubtypesByCategory(this.value)">
+        <option value="">— เลือกประเภทพืช —</option>
+        <?php foreach ($categoriesByCode as $cat): ?>
+          <option value="<?= e($cat['code']) ?>" <?= ($tree['new_species_category_code'] ?? '') === $cat['code'] ? 'selected' : '' ?>><?= e($cat['name_th']) ?></option>
+        <?php endforeach; ?>
+      </select>
+
+      <label for="new_species_subtype_id">ชนิด</label>
+      <select id="new_species_subtype_id" name="new_species_subtype_id">
+        <option value="">— เลือกชนิด —</option>
+        <?php foreach ($subtypes as $st): ?>
+          <option value="<?= (int) $st['id'] ?>" data-category="<?= e($st['category_code'] ?? '') ?>"
+            <?= (string) ($tree['new_species_subtype_id'] ?? '') === (string) $st['id'] ? 'selected' : '' ?>>
+            <?= e($st['name_th']) ?><?= $st['category_code'] === null ? ' (ยังไม่กำหนดประเภท)' : '' ?>
+          </option>
+        <?php endforeach; ?>
+      </select>
+      <p class="field-hint">จัดการรายการได้ที่ <a href="categories.php" target="_blank">ประเภทพืช</a> และ <a href="subtypes.php" target="_blank">ชนิด</a> เลือกชนิดที่ "ยังไม่กำหนดประเภท" ได้เลย ระบบจะผูกเข้ากับประเภทที่เลือกไว้ด้านบนให้อัตโนมัติตอนบันทึก</p>
+
+      <label for="new_species_name">ชื่อ (ไทย)</label>
+      <input type="text" id="new_species_name" name="new_species_name" value="<?= $v('new_species_name') ?>">
+
+      <label for="new_species_name_common">ชื่อสามัญ</label>
+      <input type="text" id="new_species_name_common" name="new_species_name_common" value="<?= $v('new_species_name_common') ?>">
+
+      <label for="new_species_name_scientific">ชื่อวิทยาศาสตร์</label>
+      <input type="text" id="new_species_name_scientific" name="new_species_name_scientific" value="<?= $v('new_species_name_scientific') ?>" placeholder="เช่น Cassia fistula">
+
+      <label for="new_species_description">คำอธิบาย (ไทย)</label>
+      <textarea id="new_species_description" name="new_species_description" rows="3"><?= $v('new_species_description') ?></textarea>
+      <p class="field-hint">รายละเอียดอื่น (วิธีดูแล ลักษณะ คุณสมบัติ ฯลฯ) แก้ไขเพิ่มได้ภายหลังที่หน้า <a href="species.php" target="_blank">จัดการชื่อต้นไม้</a></p>
+    </div>
+    <?php else: ?>
+      <p class="field-hint">แก้ไขรายละเอียดได้ที่ — <a href="species.php">จัดการชื่อต้นไม้</a></p>
+    <?php endif; ?>
 
     <label for="zone_id">โซน</label>
     <select id="zone_id" name="zone_id" required>
@@ -373,10 +499,17 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
     </div>
     <input type="file" id="image" name="image" accept="image/jpeg,image/png,image/gif,image/webp" data-preview-target="image-preview" hidden>
     <div data-ai-identify-for="image" data-endpoint="identify_tree.php" data-apply-label="เลือกชื่อต้นไม้นี้ให้" data-require-match="1"
-         data-no-match-href="species_form.php" data-no-match-text="เพิ่มเป็นชนิดพันธุ์ใหม่ก่อน"<?= AI_ENABLED ? '' : ' data-ai-unavailable="1"' ?>>
+         <?php if ($canManageSpecies): ?>
+           data-detail="full" data-no-match-create-label="ใช้ข้อมูลนี้สร้างชนิดพันธุ์ใหม่"
+         <?php else: ?>
+           data-no-match-href="species_form.php" data-no-match-text="เพิ่มเป็นชนิดพันธุ์ใหม่ก่อน"
+         <?php endif; ?>
+         <?= AI_ENABLED ? '' : ' data-ai-unavailable="1"' ?>>
       <button type="button" class="btn-outline btn-sm" data-ai-action="identify" disabled>🔍 ให้ AI ช่วยระบุชนิดต้นไม้จากรูปนี้</button>
       <?php if (!AI_ENABLED): ?>
         <p class="field-hint">ต้องตั้งค่า Gemini API key ก่อนจึงจะใช้ได้ — ดูที่หน้า <a href="settings.php#ai-translation">ตั้งค่า</a></p>
+      <?php elseif ($canManageSpecies): ?>
+        <p class="field-hint">ไม่รู้ว่าเป็นต้นอะไร? ถ่ายรูปแล้วให้ AI เดา ถ้าตรงกับชื่อที่มีในระบบจะเลือกให้ในช่อง "ชื่อต้นไม้" ด้านบน ถ้ายังไม่มีในระบบจะเสนอให้สร้างชนิดพันธุ์ใหม่จากข้อมูลนี้ได้เลย</p>
       <?php else: ?>
         <p class="field-hint">ไม่รู้ว่าเป็นต้นอะไร? ถ่ายรูปแล้วให้ AI เดา ถ้าตรงกับชื่อที่มีในระบบจะเลือกให้ในช่อง "ชื่อต้นไม้" ด้านบน</p>
       <?php endif; ?>
@@ -413,7 +546,7 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
   <script>
   function updateSpeciesDetails(id) {
     var panel = document.getElementById('species-details');
-    if (!id) { panel.style.display = 'none'; return; }
+    if (!id || id === 'new') { panel.style.display = 'none'; return; }
     var opt = document.querySelector('#species_id option[value="' + id + '"]');
     if (!opt) { panel.style.display = 'none'; return; }
     ['scientific', 'type', 'subtype-name', 'description', 'properties', 'benefits', 'cautions'].forEach(function (key) {
@@ -423,10 +556,36 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
     panel.style.display = '';
   }
 
+  // "+ เพิ่มชนิดพันธุ์ใหม่" selected in #species_id: show the inline
+  // new-species fields and make them required, so the form can't be
+  // submitted half-filled (the server checks the same rules regardless).
+  var newSpeciesPanel = document.getElementById('new-species-panel');
+  function toggleNewSpeciesPanel() {
+    var isNew = document.getElementById('species_id').value === 'new';
+    if (!newSpeciesPanel) return;
+    newSpeciesPanel.style.display = isNew ? '' : 'none';
+    ['new_species_category_code', 'new_species_subtype_id', 'new_species_name'].forEach(function (fieldId) {
+      var field = document.getElementById(fieldId);
+      if (field) field.required = isNew;
+    });
+  }
+
+  function filterNewSpeciesSubtypesByCategory(categoryCode) {
+    var select = document.getElementById('new_species_subtype_id');
+    if (!select) return;
+    select.querySelectorAll('option[value]:not([value=""])').forEach(function (opt) {
+      // A subtype with no category yet stays pickable under any category —
+      // picking it links it to whichever category is chosen here (matches
+      // species_form.php's save handler).
+      opt.hidden = !!categoryCode && !!opt.dataset.category && opt.dataset.category !== categoryCode;
+    });
+  }
+
   // Category narrows which subtypes show; category+subtype together narrow
   // which species show. Neither filter is submitted (not real <select
   // name>s) — a tree's actual category/subtype come from whichever species
-  // ends up chosen in #species_id.
+  // ends up chosen in #species_id. The "+ เพิ่มชนิดพันธุ์ใหม่" option has no
+  // data-category, so it stays visible under every filter.
   function filterSubtypesByCategory(categoryCode) {
     var select = document.getElementById('subtype_filter');
     var options = select.querySelectorAll('option[value]:not([value=""])');
@@ -446,6 +605,7 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
     var select = document.getElementById('species_id');
     var options = select.querySelectorAll('option[value]:not([value=""])');
     options.forEach(function (opt) {
+      if (opt.value === 'new') { opt.hidden = false; return; }
       var match = (!categoryCode || opt.dataset.category === categoryCode)
         && (!subtypeId || opt.dataset.subtype === subtypeId)
         && (!searchTerm || opt.textContent.toLowerCase().indexOf(searchTerm) !== -1);
@@ -461,23 +621,51 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
   filterSubtypesByCategory(document.getElementById('category_code').value);
   filterSpecies();
   updateSpeciesDetails(document.getElementById('species_id').value);
+  toggleNewSpeciesPanel();
+  if (document.getElementById('new_species_category_code')) {
+    filterNewSpeciesSubtypesByCategory(document.getElementById('new_species_category_code').value);
+  }
 
-  // "เลือกชื่อต้นไม้นี้ให้" from the AI-identify panel: the AI's answer
-  // matched an existing species, so clear the category/subtype/search filters
-  // (which could be hiding it) and select it in the dropdown.
+  // AI-identify panel result: either it matched a species already in the
+  // system (select it), or — if this admin can create species and chose to —
+  // switch into "+ เพิ่มชนิดพันธุ์ใหม่" mode with the AI's answer pre-filled.
   var aiIdentify = document.querySelector('[data-ai-identify-for="image"]');
   if (aiIdentify) aiIdentify.addEventListener('ai-identify:apply', function (e) {
-    var speciesId = e.detail.result.matched_species_id;
-    if (!speciesId) return;
-    document.getElementById('category_code').value = '';
-    filterSubtypesByCategory('');
-    document.getElementById('subtype_filter').value = '';
-    document.getElementById('species_search').value = '';
-    filterSpecies();
+    var r = e.detail.result;
     var select = document.getElementById('species_id');
-    select.value = String(speciesId);
-    updateSpeciesDetails(select.value);
-    select.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (r.matched_species_id) {
+      document.getElementById('category_code').value = '';
+      filterSubtypesByCategory('');
+      document.getElementById('subtype_filter').value = '';
+      document.getElementById('species_search').value = '';
+      filterSpecies();
+      select.value = String(r.matched_species_id);
+      updateSpeciesDetails(select.value);
+      toggleNewSpeciesPanel();
+      select.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    if (!newSpeciesPanel) return;
+    select.value = 'new';
+    updateSpeciesDetails('new');
+    toggleNewSpeciesPanel();
+    function setValue(fieldId, value) {
+      var field = document.getElementById(fieldId);
+      if (field && value) field.value = value;
+    }
+    setValue('new_species_name', r.name_th || r.name_common);
+    setValue('new_species_name_common', r.name_common);
+    setValue('new_species_name_scientific', r.name_scientific);
+    setValue('new_species_description', r.description_th);
+    if (r.category_code) {
+      var categoryField = document.getElementById('new_species_category_code');
+      categoryField.value = r.category_code;
+      filterNewSpeciesSubtypesByCategory(r.category_code);
+    }
+    if (r.subtype_ids && r.subtype_ids.length) {
+      setValue('new_species_subtype_id', String(r.subtype_ids[0]));
+    }
+    newSpeciesPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
   </script>
   <?php endif; ?>
