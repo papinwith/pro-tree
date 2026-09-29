@@ -34,8 +34,6 @@ require_once __DIR__ . '/../includes/plant_identify.php';
 // detail mode is used from this page.
 warmIdentifyRequest($canManageSpecies, $canManageSpecies ? array_values($categoriesByCode) : null, $canManageSpecies ? $subtypes : null, $speciesList);
 $zones = getAllZones($pdo);
-$mapImage = getSetting($pdo, 'default_map_image', '');
-$mapImageUrl = $mapImage ? resolveAssetUrl($mapImage, '../public') : '';
 $statuses = ['healthy' => 'สมบูรณ์', 'needs_attention' => 'ต้องดูแล', 'removed' => 'นำออกแล้ว'];
 $healthLabels = ['good' => 'ดี', 'fair' => 'พอใช้', 'poor' => 'ทรุดโทรม'];
 $observations = $id ? getObservationsForTree($pdo, $id) : [];
@@ -326,6 +324,7 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title><?= $id ? 'แก้ไข' : 'เพิ่ม' ?>ต้นไม้</title>
 <link rel="stylesheet" href="../public/assets/css/style.css">
+<?= gpsMapAssets() ?>
 </head>
 <body>
 <div class="admin-wrap admin-wrap-narrow">
@@ -464,30 +463,16 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
       </button>
     </div>
     <p class="field-hint" id="location-status" data-geolocate-status hidden></p>
+    <?= gpsMapPicker($pdo) ?>
     <p class="field-hint">
-      ปล่อยว่างไว้ถ้ายังไม่ได้สำรวจตำแหน่ง — กดปุ่ม "ใช้ตำแหน่งปัจจุบัน" ด้านบนตอนยืนอยู่หน้าต้นไม้จริง หรือเปิดแอปแผนที่บนมือถือแล้วคัดลอกพิกัดมาวางเองก็ได้
+      แตะบนแผนที่หรือลากหมุดเพื่อเลือกตำแหน่งต้นไม้ — หรือกด "ใช้ตำแหน่งปัจจุบัน" ตอนยืนอยู่หน้าต้นไม้จริง ปล่อยว่างไว้ถ้ายังไม่ได้สำรวจ
       <?php if (!empty($tree['location_updated_at'])): ?>
         (บันทึกพิกัดล่าสุดเมื่อ <?= e($tree['location_updated_at']) ?>)
       <?php endif; ?>
     </p>
-
-    <label>ตำแหน่งบนแผนที่ (คลิกปักหมุด, ไม่บังคับ)</label>
-    <?php if (!$mapImageUrl): ?>
-      <p class="field-hint">ยังไม่ได้ตั้งค่ารูปแผนที่เริ่มต้น — ไปที่หน้า <a href="settings.php">ตั้งค่า</a> ก่อนถึงจะปักหมุดได้</p>
-    <?php else: ?>
-      <div data-pin-field>
-        <div class="pin-picker-wrap" data-pin-image-wrap>
-          <img src="<?= e($mapImageUrl) ?>" alt="แผนที่">
-          <?php if (($tree['map_pin_x'] ?? null) !== null && ($tree['map_pin_y'] ?? null) !== null): ?>
-            <div class="pin-picker-pin" data-pin-marker style="left:<?= e((string) $tree['map_pin_x']) ?>%; top:<?= e((string) $tree['map_pin_y']) ?>%"></div>
-          <?php endif; ?>
-        </div>
-        <input type="hidden" name="map_pin_x" data-pin-x value="<?= $v('map_pin_x') ?>">
-        <input type="hidden" name="map_pin_y" data-pin-y value="<?= $v('map_pin_y') ?>">
-        <p><button type="button" class="btn-outline btn-sm" data-pin-remove>ลบหมุด</button></p>
-      </div>
-      <p class="field-hint">คลิกบนรูปแผนที่เพื่อปักตำแหน่งคร่าวๆ — เป็นคนละค่ากับพิกัด GPS ด้านบน (รูปแผนที่ไม่ใช่แผนที่จริงจึงไม่มีพิกัด GPS ให้อ้างอิง)</p>
-    <?php endif; ?>
+    <?php // Old %-position pin on the map image — no longer edited here, carried forward so saving keeps it. ?>
+    <input type="hidden" name="map_pin_x" value="<?= $v('map_pin_x') ?>">
+    <input type="hidden" name="map_pin_y" value="<?= $v('map_pin_y') ?>">
 
     <label>รูปภาพต้นไม้</label>
     <?php if (!empty($tree['image_path'])): ?>
@@ -769,7 +754,7 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
   <?php endif; ?>
 </div>
 <?php require __DIR__ . '/_confirm_modal.php'; ?>
-<script src="../public/assets/js/map-pin-picker.js"></script>
+<script src="../public/assets/js/gps-map-picker.js"></script>
 <script src="../public/assets/js/image-preview.js"></script>
 <script src="../public/assets/js/ai-identify-button.js"></script>
 <script src="../public/assets/js/geolocate-button.js"></script>

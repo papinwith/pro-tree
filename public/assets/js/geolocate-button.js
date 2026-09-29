@@ -35,6 +35,8 @@
         function (position) {
           latInput.value = position.coords.latitude.toFixed(6);
           lngInput.value = position.coords.longitude.toFixed(6);
+          // Let listeners (e.g. gps-map-picker.js) follow the new value.
+          latInput.dispatchEvent(new Event('input', { bubbles: true }));
           var accuracy = position.coords.accuracy ? Math.round(position.coords.accuracy) : null;
           setStatus(accuracy ? ('ได้ตำแหน่งแล้ว — ความแม่นยำ ±' + accuracy + ' เมตร') : 'ได้ตำแหน่งแล้ว');
           button.disabled = false;

@@ -820,3 +820,15 @@ h1.tree-name { font-size: 1.65rem; font-weight: 800; margin: 18px 0 2px; letter-
    always renders the bright/light palette above, regardless of the
    visitor's OS/browser color-scheme setting, instead of switching to a
    black background via prefers-color-scheme. */
+
+/* Real OpenStreetMap map for picking GPS (gps-map-picker.js). isolation keeps
+   Leaflet's own z-indexes from drawing over the admin menu dropdowns. */
+.gps-map {
+  height: 320px;
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  isolation: isolate;
+  z-index: 0;
+}
+.gps-map-tall { height: 480px; }

@@ -20,8 +20,6 @@ $subtypesById = array_column($subtypes, null, 'id');
 $zones = getAllZones($pdo);
 require_once __DIR__ . '/../includes/plant_identify.php';
 warmIdentifyRequest($canManageSpecies, $canManageSpecies ? $categories : null, $canManageSpecies ? $subtypes : null, $speciesList);
-$mapImage = getSetting($pdo, 'default_map_image', '');
-$mapImageUrl = $mapImage ? resolveAssetUrl($mapImage, '../public') : '';
 $treeStatuses = ['healthy' => 'สมบูรณ์', 'needs_attention' => 'ต้องดูแล', 'removed' => 'นำออกแล้ว'];
 // Thai-only, same as species_form.php — English/Chinese are generated later.
 $detailSections = [
@@ -94,10 +92,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $lngInput = trim($_POST['longitude'] ?? '');
     $latitude = $latInput !== '' ? (float) $latInput : null;
     $longitude = $lngInput !== '' ? (float) $lngInput : null;
-    $pinXInput = trim($_POST['map_pin_x'] ?? '');
-    $pinYInput = trim($_POST['map_pin_y'] ?? '');
-    $mapPinX = $pinXInput !== '' ? max(0, min(100, (float) $pinXInput)) : null;
-    $mapPinY = $pinYInput !== '' ? max(0, min(100, (float) $pinYInput)) : null;
 
     if ($quantity > 0) {
         if (!$zoneId || !getZoneById($pdo, $zoneId)) {
@@ -158,9 +152,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $maxOrder = (int) $pdo->query('SELECT COALESCE(MAX(display_order), 0) FROM trees')->fetchColumn();
                 $insertTree = $pdo->prepare(
                     'INSERT INTO trees (species_id, zone_id, area_code, status, image_path, latitude, longitude, location_updated_at,
-                     map_pin_x, map_pin_y, display_order, is_active)
+                     display_order, is_active)
                      VALUES (:species_id, :zone_id, :area_code, :status, :image_path, :latitude, :longitude, :location_updated_at,
-                     :map_pin_x, :map_pin_y, :display_order, :is_active)'
+                     :display_order, :is_active)'
                 );
                 // plant_code is recomputed right after each insert so later rows
                 // in this batch get their own sequence (see tree_form.php).
@@ -170,7 +164,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'image_path' => $newSpeciesMode ? null : $photoPath,
                         'latitude' => $latitude, 'longitude' => $longitude,
                         'location_updated_at' => ($latitude !== null || $longitude !== null) ? date('Y-m-d H:i:s') : null,
-                        'map_pin_x' => $mapPinX, 'map_pin_y' => $mapPinY,
                         'display_order' => $maxOrder + $i, 'is_active' => $isActive,
                     ]);
                     $newTreeId = (int) $pdo->lastInsertId();
@@ -209,7 +202,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'category_code' => $categoryCode, 'subtype_ids' => $selectedSubtypeIds,
         'name' => $name, 'name_common' => $nameCommon, 'name_scientific' => $nameScientific, 'description' => $description,
         'zone_id' => $zoneId, 'quantity' => $quantity, 'status' => $status, 'is_active' => $isActive,
-        'latitude' => $latInput, 'longitude' => $lngInput, 'map_pin_x' => $mapPinX, 'map_pin_y' => $mapPinY,
+        'latitude' => $latInput, 'longitude' => $lngInput,
     ] + $detailValues;
 }
 
@@ -228,6 +221,7 @@ $selectedSubtypeIds = $form['subtype_ids'] ?? [];
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>เพิ่มต้นไม้ / ชนิดพันธุ์</title>
 <link rel="stylesheet" href="../public/assets/css/style.css">
+<?= gpsMapAssets() ?>
 </head>
 <body>
 <div class="admin-wrap admin-wrap-narrow">
@@ -368,8 +362,8 @@ $selectedSubtypeIds = $form['subtype_ids'] ?? [];
         <?php endforeach; ?>
       </select>
 
-      <details class="mb-lg"<?= ($form['latitude'] ?? '') !== '' || ($form['map_pin_x'] ?? null) !== null ? ' open' : '' ?>>
-        <summary>ตำแหน่ง (GPS / ปักหมุดบนแผนที่ — ไม่บังคับ)</summary>
+      <details class="mb-lg"<?= ($form['latitude'] ?? '') !== '' ? ' open' : '' ?>>
+        <summary>ตำแหน่งบนแผนที่ (ไม่บังคับ)</summary>
         <label for="latitude">พิกัด GPS</label>
         <div class="field-row">
           <input type="text" id="latitude" name="latitude" inputmode="decimal" placeholder="ละติจูด เช่น 13.7563" value="<?= $v('latitude') ?>">
@@ -378,22 +372,8 @@ $selectedSubtypeIds = $form['subtype_ids'] ?? [];
                   data-lat-target="latitude" data-lng-target="longitude" data-status-target="location-status">📍 ใช้ตำแหน่งปัจจุบัน</button>
         </div>
         <p class="field-hint" id="location-status" data-geolocate-status hidden></p>
-
-        <?php if ($mapImageUrl): ?>
-          <label>ปักหมุดบนแผนที่</label>
-          <div data-pin-field>
-            <div class="pin-picker-wrap" data-pin-image-wrap>
-              <img src="<?= e($mapImageUrl) ?>" alt="แผนที่">
-              <?php if (($form['map_pin_x'] ?? null) !== null && ($form['map_pin_y'] ?? null) !== null): ?>
-                <div class="pin-picker-pin" data-pin-marker style="left:<?= e((string) $form['map_pin_x']) ?>%; top:<?= e((string) $form['map_pin_y']) ?>%"></div>
-              <?php endif; ?>
-            </div>
-            <input type="hidden" name="map_pin_x" data-pin-x value="<?= $v('map_pin_x') ?>">
-            <input type="hidden" name="map_pin_y" data-pin-y value="<?= $v('map_pin_y') ?>">
-            <p><button type="button" class="btn-outline btn-sm" data-pin-remove>ลบหมุด</button></p>
-          </div>
-        <?php endif; ?>
-        <p class="field-hint">ใช้ตำแหน่งเดียวกันกับทุกต้นที่เพิ่มครั้งนี้ — ปรับเป็นรายต้นได้ภายหลังที่หน้าแก้ไขต้นไม้</p>
+        <?= gpsMapPicker($pdo) ?>
+        <p class="field-hint">แตะบนแผนที่หรือลากหมุดเพื่อเลือกตำแหน่ง — ใช้ตำแหน่งเดียวกันกับทุกต้นที่เพิ่มครั้งนี้ ปรับเป็นรายต้นได้ภายหลังที่หน้าแก้ไขต้นไม้</p>
       </details>
 
       <label>
@@ -573,7 +553,7 @@ $selectedSubtypeIds = $form['subtype_ids'] ?? [];
   </script>
   <?php endif; ?>
 </div>
-<script src="../public/assets/js/map-pin-picker.js"></script>
+<script src="../public/assets/js/gps-map-picker.js"></script>
 <script src="../public/assets/js/image-preview.js"></script>
 <script src="../public/assets/js/ai-identify-button.js"></script>
 <script src="../public/assets/js/geolocate-button.js"></script>

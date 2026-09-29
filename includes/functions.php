@@ -1118,3 +1118,31 @@ function generateDatabaseBackupSql(PDO $pdo): string
     $out .= "SET session_replication_role = 'origin';\n";
     return $out;
 }
+
+/**
+ * The map box for public/assets/js/gps-map-picker.js (real OpenStreetMap map
+ * for picking latitude/longitude into the two given fields). With no position
+ * typed yet it opens on the average of the trees that already have GPS (the
+ * garden itself), or on Thailand when none do. The page must also load Leaflet
+ * (gpsMapAssets()) and gps-map-picker.js.
+ */
+function gpsMapPicker(PDO $pdo, string $latFieldId = 'latitude', string $lngFieldId = 'longitude'): string
+{
+    static $center = null;
+    if ($center === null) {
+        $row = $pdo->query('SELECT AVG(latitude) AS lat, AVG(longitude) AS lng FROM trees WHERE latitude IS NOT NULL AND longitude IS NOT NULL')->fetch();
+        $center = ($row && $row['lat'] !== null)
+            ? [(float) $row['lat'], (float) $row['lng'], 17]
+            : [13.0, 101.0, 6];
+    }
+    return '<div class="gps-map" data-gps-map data-lat-target="' . e($latFieldId) . '" data-lng-target="' . e($lngFieldId) . '"'
+        . ' data-default-lat="' . e((string) $center[0]) . '" data-default-lng="' . e((string) $center[1]) . '"'
+        . ' data-default-zoom="' . (int) $center[2] . '"></div>';
+}
+
+/** Leaflet (the map library behind gpsMapPicker()) — put inside <head>. */
+function gpsMapAssets(): string
+{
+    return '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">' . "\n"
+        . '<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>';
+}
