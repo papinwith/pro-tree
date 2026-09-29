@@ -214,7 +214,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $v = fn($key, $default = '') => e((string) ($form[$key] ?? $default));
-$speciesMode = $form['species_mode'] ?? (($canManageSpecies && (!$speciesList || !$canCreateTrees)) ? 'new' : 'existing');
+// ?mode=new (the "+ เพิ่มชนิดพันธุ์" button on species.php) starts on "new species".
+$speciesMode = $form['species_mode']
+    ?? (($canManageSpecies && (!$speciesList || !$canCreateTrees || ($_GET['mode'] ?? '') === 'new')) ? 'new' : 'existing');
 // Both choices only make sense when there is something to pick and trees can be planted.
 $offerSpeciesChoice = $canManageSpecies && $canCreateTrees && $speciesList;
 $selectedSubtypeIds = $form['subtype_ids'] ?? [];
