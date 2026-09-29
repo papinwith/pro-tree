@@ -1135,7 +1135,7 @@ function gpsMapPicker(PDO $pdo, string $latFieldId = 'latitude', string $lngFiel
             ? [(float) $row['lat'], (float) $row['lng'], 17]
             : [13.0, 101.0, 6];
     }
-    return '<div class="gps-map" data-gps-map data-lat-target="' . e($latFieldId) . '" data-lng-target="' . e($lngFieldId) . '"'
+    return '<div class="gps-map" style="height:320px" data-gps-map data-lat-target="' . e($latFieldId) . '" data-lng-target="' . e($lngFieldId) . '"'
         . ' data-default-lat="' . e((string) $center[0]) . '" data-default-lng="' . e((string) $center[1]) . '"'
         . ' data-default-zoom="' . (int) $center[2] . '"></div>';
 }

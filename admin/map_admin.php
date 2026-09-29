@@ -77,7 +77,7 @@ $mapImageUrl = $mapImage ? resolveAssetUrl($mapImage, '../public') : '';
     ต้นไม้ <?= count($gpsTrees) ?> ต้น และแผนการปลูก <?= count($gpsPlans) ?> แผนที่มีพิกัด —
     สีเขียว = สมบูรณ์, ส้ม = ต้องดูแล, แดง = นำออกแล้ว, น้ำเงิน = แผนการปลูก แตะหมุดเพื่อเปิดหน้าแก้ไข
   </p>
-  <div id="gpsOverview" class="gps-map gps-map-tall"></div>
+  <div id="gpsOverview" class="gps-map gps-map-tall" style="height:480px"></div>
   <script>
   (function () {
     var el = document.getElementById('gpsOverview');
