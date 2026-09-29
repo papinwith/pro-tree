@@ -47,7 +47,7 @@ coerces types, caps lengths and the alternatives list, and treats
 
 One Gemini call per click (not per photo taken) — deliberately a button, not
 automatic, so an admin browsing photos isn't billed for each one. Upload limit
-5 MB (the browser shrinks photos well below that first). The endpoint releases
+10 MB (the browser shrinks photos well below that first). The endpoint releases
 the PHP session lock before the (up to 60 s) API call so other admin tabs stay
 responsive.
 

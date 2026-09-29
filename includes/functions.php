@@ -811,7 +811,7 @@ function resolveAssetUrl(string $value, string $base): string
 
 /**
  * Checks a $_FILES entry that should be an image: upload succeeded, within
- * the 5 MB limit, and really a JPG/PNG/GIF/WEBP by its actual content (not
+ * the 10 MB limit, and really a JPG/PNG/GIF/WEBP by its actual content (not
  * its name or client-declared type). Returns ['ext' => 'jpg', 'mime' =>
  * 'image/jpeg'], or null if no file was submitted for this field. Throws
  * RuntimeException with a Thai message otherwise. Shared by every upload
@@ -824,16 +824,16 @@ function inspectUploadedImage(array $file): ?array
     }
     if ($file['error'] === UPLOAD_ERR_INI_SIZE || $file['error'] === UPLOAD_ERR_FORM_SIZE) {
         // PHP's own upload_max_filesize (2 MB by default) tripped before our
-        // 5 MB check below could — same problem from the admin's side.
-        throw new RuntimeException('ไฟล์รูปภาพมีขนาดใหญ่เกินไป (สูงสุด 5 MB)');
+        // 10 MB check below could — same problem from the admin's side.
+        throw new RuntimeException('ไฟล์รูปภาพมีขนาดใหญ่เกินไป (สูงสุด 10 MB)');
     }
     if ($file['error'] !== UPLOAD_ERR_OK) {
         throw new RuntimeException('อัปโหลดล้มเหลว (รหัสข้อผิดพลาด ' . $file['error'] . ')');
     }
 
-    $maxBytes = 5 * 1024 * 1024;
+    $maxBytes = 10 * 1024 * 1024;
     if ($file['size'] > $maxBytes) {
-        throw new RuntimeException('ไฟล์รูปภาพมีขนาดใหญ่เกินไป (สูงสุด 5 MB)');
+        throw new RuntimeException('ไฟล์รูปภาพมีขนาดใหญ่เกินไป (สูงสุด 10 MB)');
     }
 
     $imageInfo = @getimagesize($file['tmp_name']);

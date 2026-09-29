@@ -44,7 +44,7 @@ if (($_SESSION['identify_permitted_until'] ?? 0) < $now) {
 // A body over post_max_size makes PHP drop $_POST and $_FILES entirely, which
 // would otherwise surface as a misleading "CSRF expired" below.
 if (empty($_POST) && empty($_FILES) && (int) ($_SERVER['CONTENT_LENGTH'] ?? 0) > 0) {
-    identifyJson(413, ['ok' => false, 'error' => 'ไฟล์รูปภาพมีขนาดใหญ่เกินไป (สูงสุด 5 MB)']);
+    identifyJson(413, ['ok' => false, 'error' => 'ไฟล์รูปภาพมีขนาดใหญ่เกินไป (สูงสุด 10 MB)']);
 }
 $submittedToken = $_POST['csrf_token'] ?? '';
 if (!is_string($submittedToken) || empty($_SESSION['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $submittedToken)) {

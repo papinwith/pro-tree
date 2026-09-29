@@ -44,7 +44,7 @@
   var CONFIDENCE_LABELS = { high: 'มั่นใจสูง', medium: 'มั่นใจปานกลาง', low: 'เดาจากภาพ (มั่นใจต่ำ)' };
 
   // Shrinks the photo before upload: a fresh phone photo is 3-8 MB, which
-  // is slow on mobile data and near the server's 5 MB limit. Falls back to
+  // is slow on mobile data and near the server's 10 MB limit. Falls back to
   // the original file if the browser can't decode it (e.g. HEIC).
   function downscale(blob) {
     return new Promise(function (resolve) {

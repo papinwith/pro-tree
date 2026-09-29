@@ -420,7 +420,7 @@ $currentClassificationId = $species['classification_id'] ?? '';
       <div data-ai-output aria-live="polite"></div>
     </div>
     <p class="field-hint">
-      JPG / PNG / GIF / WEBP ขนาดไม่เกิน 5 MB — แสดงในรายการชนิดพันธุ์ และเป็นรูปสำรองบนหน้าต้นไม้ของผู้เข้าชม
+      JPG / PNG / GIF / WEBP ขนาดไม่เกิน 10 MB — แสดงในรายการชนิดพันธุ์ และเป็นรูปสำรองบนหน้าต้นไม้ของผู้เข้าชม
       สำหรับต้นที่ยังไม่มีรูปของตัวเอง
     </p>
     <?php if ($id && !empty($species['image_path'])): ?>
