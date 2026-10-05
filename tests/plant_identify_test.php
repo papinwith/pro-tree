@@ -111,6 +111,47 @@ check('prompt: full mode asks for every long-form field and lists the real categ
 check('scientificNameKey: genus + species only, case/author/cultivar-insensitive',
     scientificNameKey("  Cassia FISTULA L. 'Alba' ") === 'cassia fistula' && scientificNameKey('Ficus') === 'ficus' && scientificNameKey('') === '');
 
+// --- confidence percentage and second opinion (pure logic, no network) ---
+$n = fn(array $r) => normalizePlantIdentification($r + ['is_plant' => true, 'name_th' => 'ต้น', 'name_scientific' => 'Aa bb']);
+check('confidence_pct: an integer is kept, clamped to 0-100, label derived',
+    $n(['confidence_pct' => 82])['confidence_pct'] === 82 && $n(['confidence_pct' => 82])['confidence'] === 'high'
+    && $n(['confidence_pct' => 140])['confidence_pct'] === 100 && $n(['confidence_pct' => -5])['confidence_pct'] === 0
+    && $n(['confidence_pct' => 55])['confidence'] === 'medium' && $n(['confidence_pct' => 20])['confidence'] === 'low');
+check('confidence_pct: "73%" strings are understood; junk falls back to low (30)',
+    $n(['confidence_pct' => '73%'])['confidence_pct'] === 73 && $n(['confidence_pct' => 'lots'])['confidence_pct'] === 30 && $n([])['confidence_pct'] === 30);
+check('confidence_pct: the older high/medium/low still maps to a percentage',
+    $n(['confidence' => 'high'])['confidence_pct'] === 85 && $n(['confidence' => 'medium'])['confidence_pct'] === 60);
+check('prompt asks for confidence_pct (a number), not high/medium/low',
+    str_contains(buildPlantIdentifyPrompt(), 'confidence_pct') && !str_contains(buildPlantIdentifyPrompt(), 'high|medium|low'));
+
+$mk = fn(string $th, string $sci, int $pct, bool $plant = true) => normalizePlantIdentification(['is_plant' => $plant, 'name_th' => $th, 'name_scientific' => $sci, 'confidence_pct' => $pct]);
+$agree = applySecondOpinion($mk('ราชพฤกษ์', 'Cassia fistula', 55), $mk('ชัยพฤกษ์', 'Cassia fistula L.', 60), 70);
+check('second opinion agrees: confidence rises to max+10 and the case is no longer flagged',
+    $agree['second_opinion']['agrees'] === true && $agree['confidence_pct'] === 70 && $agree['needs_review'] === false && $agree['answered_by'] === 'local', json_encode($agree, JSON_UNESCAPED_UNICODE));
+$cap = applySecondOpinion($mk('ก', 'Aa bb', 90), $mk('ก', 'Aa bb', 92), 70);
+check('second opinion agrees: confidence is capped at 95', $cap['confidence_pct'] === 95);
+$diffLocal = applySecondOpinion($mk('ราชพฤกษ์', 'Cassia fistula', 60), $mk('หางนกยูง', 'Delonix regia', 40), 70);
+check('second opinion differs and is less sure: keep the local answer, list the other as an alternative, lower confidence, flag for review',
+    $diffLocal['name_scientific'] === 'Cassia fistula' && $diffLocal['confidence_pct'] === 40 && $diffLocal['needs_review'] === true
+    && $diffLocal['alternatives'][0]['name_scientific'] === 'Delonix regia' && $diffLocal['second_opinion']['agrees'] === false && $diffLocal['answered_by'] === 'local');
+$diffSecond = applySecondOpinion($mk('ราชพฤกษ์', 'Cassia fistula', 40), $mk('หางนกยูง', 'Delonix regia', 80), 70);
+check('second opinion differs and is more sure: it becomes the main answer, the local one moves to alternatives',
+    $diffSecond['name_scientific'] === 'Delonix regia' && $diffSecond['answered_by'] === 'second' && $diffSecond['confidence_pct'] === 60
+    && $diffSecond['alternatives'][0]['name_scientific'] === 'Cassia fistula' && $diffSecond['needs_review'] === true);
+$none = applySecondOpinion($mk('ราชพฤกษ์', 'Cassia fistula', 50), null, 70);
+check('no second opinion: answer unchanged, flagged when under the threshold', $none['second_opinion'] === null && $none['confidence_pct'] === 50 && $none['needs_review'] === true);
+check('a confident local answer is not flagged', applySecondOpinion($mk('ก', 'Aa bb', 88), null, 70)['needs_review'] === false);
+check('not-a-plant is never flagged or compared', applySecondOpinion($mk('', '', 0, false), $mk('ก', 'Aa bb', 90), 70)['needs_review'] === false);
+
+// The whole flow with a fake Ollama is covered by the HTTP tests below; here only the second-opinion decision,
+// using an injected "ask" so no Gemini call is made.
+$asked = [];
+$fakeAsk = function (string $prompt, string $bytes, string $mime, float $budget, ?string &$err) use (&$asked) {
+    $asked[] = $budget;
+    return json_encode(['is_plant' => true, 'name_th' => 'ที่สอง', 'name_scientific' => 'Zz yy', 'confidence_pct' => 90]);
+};
+check('second-opinion helper is available only with a key', secondOpinionAvailable() === (GEMINI_API_KEY !== ''));
+
 $pdo = db();
 $existing = $pdo->query("SELECT id, name, name_scientific FROM species WHERE name_scientific IS NOT NULL AND name_scientific <> '' ORDER BY id LIMIT 1")->fetch();
 if ($existing) {

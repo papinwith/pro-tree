@@ -75,6 +75,27 @@ nursery stocks; the wording tells the model to ignore the list unless the photo
 clearly matches. An answer of "Unknown ..." / "ไม่ทราบ" is treated as "could not
 tell" instead of being shown as a name.
 
+## Confidence percentage and second opinion
+
+The local model reports `confidence_pct` (0-100); the page shows it as e.g.
+"ความมั่นใจ: 82%". It is the model's own estimate, not a calibrated probability.
+
+When it is below `AI_CONFIDENCE_MIN` (default 70) and `GEMINI_API_KEY` is set, the
+same photo and prompt are also sent to Gemini (`GEMINI_MODEL`, default
+`gemini-3.5-flash-lite`; `includes/second_opinion.php`) and `applySecondOpinion()`
+merges the two answers:
+
+| Result | What happens |
+|---|---|
+| Same species | confidence = higher of the two + 10 (max 95) |
+| Different species | the more confident answer is the main one, the other goes to the alternatives, confidence - 20 |
+| No answer from Gemini | `second_opinion_status` is `no_key`, `no_time` (under ~6 s of the budget left) or `failed`; the local answer is kept |
+
+`needs_review` is true while the final confidence is still under the threshold, and
+the page then asks for a person who knows plants to check it, or a better photo.
+The photo only leaves the machine when this second opinion is actually requested.
+Two models agreeing is a good sign, not a guarantee: both can be wrong the same way.
+
 ## Known limits
 
 - Small local models are less accurate than large hosted ones. The confidence

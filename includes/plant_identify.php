@@ -5,6 +5,7 @@
 // review — nothing here writes to the database.
 require_once __DIR__ . '/functions.php';
 require_once __DIR__ . '/ollama.php';
+require_once __DIR__ . '/second_opinion.php';
 
 /**
  * Coerces whatever JSON the model returned into a predictable, bounded
@@ -33,10 +34,16 @@ function normalizePlantIdentification(array $raw): array
         }
     }
 
-    $confidence = $raw['confidence'] ?? '';
-    if (!in_array($confidence, ['high', 'medium', 'low'], true)) {
-        $confidence = 'low';
+    // The model is asked for a 0-100 percentage; the older high/medium/low is still understood.
+    $pct = $raw['confidence_pct'] ?? null;
+    if (is_string($pct) && is_numeric(rtrim($pct, '% '))) {
+        $pct = (float) rtrim($pct, '% ');
     }
+    if (!is_int($pct) && !is_float($pct)) {
+        $pct = ['high' => 85, 'medium' => 60, 'low' => 30][$raw['confidence'] ?? ''] ?? 30;
+    }
+    $confidencePct = (int) max(0, min(100, round((float) $pct)));
+    $confidence = confidenceLabel($confidencePct);
 
     $nameTh = $str($raw['name_th'] ?? null, 120);
     $nameScientific = $str($raw['name_scientific'] ?? null, 160);
@@ -73,12 +80,19 @@ function normalizePlantIdentification(array $raw): array
         'name_common' => $isPlant ? $str($raw['name_common'] ?? null, 120) : '',
         'name_scientific' => $isPlant ? $nameScientific : '',
         'confidence' => $confidence,
+        'confidence_pct' => $confidencePct,
         'description_th' => $isPlant ? $str($raw['description_th'] ?? null, 1200) : '',
         'notes_th' => $str($raw['notes_th'] ?? null, 600),
         'alternatives' => $isPlant ? $alternatives : [],
         'category_code' => $isPlant ? ($str($raw['category_code'] ?? null, 20) ?: null) : null,
         'subtype_ids' => $isPlant ? array_slice(array_values($subtypeIds), 0, 3) : [],
     ] + $detail;
+}
+
+/** high / medium / low for a 0-100 confidence percentage. */
+function confidenceLabel(int $pct): string
+{
+    return $pct >= 75 ? 'high' : ($pct >= 50 ? 'medium' : 'low');
 }
 
 /** The long-form species fields the AI can draft, same keys as the `species` columns. */
@@ -138,7 +152,7 @@ function buildPlantIdentifyPrompt(?array $catalogue = null, ?array $knownSpecies
         . "Identify the plant in the attached photo.\n\n"
         . "Rules:\n"
         . "- Base the identification only on what is actually visible (leaves, flowers, fruit, bark, growth habit). Do not guess wildly; if unsure, say so via a lower confidence.\n"
-        . "- confidence: \"high\" only if the plant is clearly and distinctively identifiable, \"medium\" if likely but similar species exist, \"low\" if it is a best guess.\n"
+        . "- confidence_pct: an integer 0-100, your honest probability that name_scientific is correct. 90+ only when distinctive features (flower, fruit, leaf shape) are clearly visible; 50-75 when likely but similar species exist; below 50 when it is a best guess. Do not default to a high number.\n"
         . "- If the photo does not show a plant, or the plant cannot be identified at all, set is_plant to false and leave the name fields empty.\n"
         . "- Consider species commonly grown in Thailand first, but name what you actually see; look for the features that separate look-alikes. If you are only sure of the genus, give the genus with your most likely species and set confidence to low.\n"
         . "- name_th is the common Thai name of THAT species — use an empty string if you do not know a real Thai name, never invent one; name_common is the common English name; name_scientific is the Latin binomial (genus + species, no author).\n"
@@ -158,7 +172,7 @@ function buildPlantIdentifyPrompt(?array $catalogue = null, ?array $knownSpecies
     $prompt .= "- Never answer \"Unknown\": if you cannot name the species give the genus with sp., and if you cannot even do that, set is_plant to false.
 ";
 
-    $shape = '"is_plant": true, "name_th": "...", "name_common": "...", "name_scientific": "...", "confidence": "high|medium|low", '
+    $shape = '"is_plant": true, "name_th": "...", "name_common": "...", "name_scientific": "...", "confidence_pct": 0, '
         . '"description_th": "...", "notes_th": "...", "alternatives": [{"name_th": "...", "name_scientific": "..."}]';
 
     if ($catalogue !== null) {
@@ -183,19 +197,81 @@ function buildPlantIdentifyPrompt(?array $catalogue = null, ?array $knownSpecies
     return $prompt . "\nRespond with ONLY a JSON object of this exact shape (no markdown fences, no commentary):\n{" . $shape . '}';
 }
 
+/** True when two identifications name the same species (scientific name, else exact Thai name). */
+function sameSpecies(array $a, array $b): bool
+{
+    $ka = scientificNameKey((string) ($a['name_scientific'] ?? ''));
+    $kb = scientificNameKey((string) ($b['name_scientific'] ?? ''));
+    if ($ka !== '' && $kb !== '') {
+        return $ka === $kb;
+    }
+    $ta = trim((string) ($a['name_th'] ?? ''));
+    return $ta !== '' && $ta === trim((string) ($b['name_th'] ?? ''));
+}
+
+/**
+ * Combines the local model's answer ($first) with a second opinion ($second,
+ * already normalized, or null when none was obtained). Pure function.
+ *
+ * - same species: confidence rises (the higher of the two, +10, capped at 95)
+ * - different species: the more confident answer becomes the main one, the other is
+ *   listed among the alternatives, and the confidence drops by 20
+ * Adds second_opinion (what the second model said), answered_by ('local' or
+ * 'second') and needs_review (still under AI_CONFIDENCE_MIN). These percentages
+ * are the models' own estimates combined by rule of thumb, not calibrated probabilities.
+ */
+function applySecondOpinion(array $first, ?array $second, ?int $minConfidence = null): array
+{
+    $min = $minConfidence ?? AI_CONFIDENCE_MIN;
+    $result = $first + ['second_opinion' => null, 'answered_by' => 'local'];
+
+    if ($second !== null && $second['is_plant'] && $first['is_plant']) {
+        $agrees = sameSpecies($first, $second);
+        $result['second_opinion'] = [
+            'source' => 'gemini',
+            'agrees' => $agrees,
+            'name_th' => $second['name_th'],
+            'name_scientific' => $second['name_scientific'],
+            'confidence_pct' => $second['confidence_pct'],
+        ];
+        if ($agrees) {
+            $result['confidence_pct'] = min(95, max($first['confidence_pct'], $second['confidence_pct']) + 10);
+        } else {
+            $useSecond = $second['confidence_pct'] > $first['confidence_pct'];
+            $main = $useSecond ? $second : $first;
+            $other = $useSecond ? $first : $second;
+            $result = $main + ['second_opinion' => $result['second_opinion'], 'answered_by' => $useSecond ? 'second' : 'local'];
+            $result['confidence_pct'] = max(5, $main['confidence_pct'] - 20);
+            array_unshift($result['alternatives'], ['name_th' => $other['name_th'], 'name_scientific' => $other['name_scientific']]);
+            $result['alternatives'] = array_slice($result['alternatives'], 0, 3);
+        }
+        $result['confidence'] = confidenceLabel($result['confidence_pct']);
+    }
+
+    $result['needs_review'] = $result['is_plant'] && $result['confidence_pct'] < $min;
+    return $result;
+}
+
 /**
  * Sends the photo to the Ollama vision model. Returns ['ok' => true, 'result' => <normalized>]
  * or ['ok' => false, 'error' => <Thai message>, 'timed_out' => bool]. Pass
  * $catalogue (see buildPlantIdentifyPrompt()) for the full write-up; the
  * category/subtype it picks are then validated against that same catalogue.
- * $budgetSeconds is a hard cap on the whole AI call (see ollamaGenerateText()).
+ * $budgetSeconds is a hard cap on the whole call, the second opinion included.
  * $knownSpecies (rows with name_scientific) are offered to the model as candidates.
+ *
+ * When the local answer is under AI_CONFIDENCE_MIN percent and GEMINI_API_KEY is
+ * set, the same photo and prompt go to Gemini and applySecondOpinion() merges the
+ * two. result.second_opinion_status says what happened: not_needed, asked,
+ * no_key, no_time or failed. $askSecond is injectable for tests.
  */
-function identifyPlantFromImage(string $imageBytes, string $mimeType, ?array $catalogue = null, float $budgetSeconds = 60.0, ?array $knownSpecies = null): array
+function identifyPlantFromImage(string $imageBytes, string $mimeType, ?array $catalogue = null, float $budgetSeconds = 60.0, ?array $knownSpecies = null, ?callable $askSecond = null): array
 {
+    $startedAt = microtime(true);
+    $prompt = buildPlantIdentifyPrompt($catalogue, $knownSpecies);
     $error = null;
     $timedOut = false;
-    $innerText = ollamaGenerateText(OLLAMA_VISION_MODEL, buildPlantIdentifyPrompt($catalogue, $knownSpecies), $budgetSeconds, base64_encode($imageBytes), $error, $timedOut);
+    $innerText = ollamaGenerateText(OLLAMA_VISION_MODEL, $prompt, $budgetSeconds, base64_encode($imageBytes), $error, $timedOut);
 
     if ($innerText === null) {
         return ['ok' => false, 'error' => $error ?? 'เรียกใช้บริการ AI ไม่สำเร็จ', 'timed_out' => $timedOut];
@@ -205,7 +281,32 @@ function identifyPlantFromImage(string $imageBytes, string $mimeType, ?array $ca
     if (!is_array($raw)) {
         return ['ok' => false, 'error' => 'อ่านผลลัพธ์จาก AI ไม่ได้ กรุณาลองใหม่อีกครั้ง'];
     }
-    $result = normalizePlantIdentification($raw);
+    $first = normalizePlantIdentification($raw);
+
+    $status = 'not_needed';
+    $second = null;
+    if ($first['is_plant'] && $first['confidence_pct'] < AI_CONFIDENCE_MIN) {
+        $ask = $askSecond ?? 'geminiSecondOpinionText';
+        $remaining = $budgetSeconds - (microtime(true) - $startedAt);
+        if ($askSecond === null && !secondOpinionAvailable()) {
+            $status = 'no_key';
+        } elseif ($remaining < 6.0) {
+            $status = 'no_time';
+        } else {
+            $secondError = null;
+            $secondText = $ask($prompt, $imageBytes, $mimeType, min(40.0, $remaining - 1.0), $secondError);
+            $secondRaw = $secondText === null ? null : json_decode($secondText, true);
+            if (is_array($secondRaw)) {
+                $second = normalizePlantIdentification($secondRaw);
+                $status = 'asked';
+            } else {
+                $status = 'failed';
+            }
+        }
+    }
+
+    $result = applySecondOpinion($first, $second);
+    $result['second_opinion_status'] = $status;
     if ($catalogue !== null) {
         $result = constrainToCatalogue($result, $catalogue['categories'], $catalogue['subtypes']);
     }

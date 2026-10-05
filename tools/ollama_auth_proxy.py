@@ -23,6 +23,7 @@ ALLOWED = ("/api/chat", "/api/version")  # all the website needs
 
 class Handler(BaseHTTPRequestHandler):
     def _deny(self, code: int, msg: str) -> None:
+        print(f"{self.command} {self.path} -> {code} ({msg})", flush=True)
         self.send_response(code)
         self.send_header("Content-Length", str(len(msg)))
         self.end_headers()
@@ -43,6 +44,7 @@ class Handler(BaseHTTPRequestHandler):
             data, code = e.read(), e.code
         except Exception:
             return self._deny(502, "ollama unreachable")
+        print(f"{self.command} {self.path} -> {code}", flush=True)  # status only, never bodies or the token
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
@@ -51,7 +53,7 @@ class Handler(BaseHTTPRequestHandler):
 
     do_GET = do_POST = _handle
 
-    def log_message(self, *a):  # keep the console quiet; no request bodies in logs
+    def log_message(self, *a):  # replaced by the status-only lines above
         pass
 
 

@@ -74,6 +74,18 @@ if (!defined('OLLAMA_URL')) {
 if (!defined('OLLAMA_API_KEY')) {
     define('OLLAMA_API_KEY', (string) (getenv('OLLAMA_API_KEY') ?: ''));
 }
+// Second opinion: when the local model is not confident enough (below AI_CONFIDENCE_MIN, a
+// percentage), the photo is also sent to Gemini and the two answers are compared. Off unless
+// GEMINI_API_KEY is set (server-side only, never sent to the browser).
+if (!defined('GEMINI_API_KEY')) {
+    define('GEMINI_API_KEY', (string) (getenv('GEMINI_API_KEY') ?: ''));
+}
+if (!defined('GEMINI_MODEL')) {
+    define('GEMINI_MODEL', getenv('GEMINI_MODEL') ?: 'gemini-3.5-flash-lite');
+}
+if (!defined('AI_CONFIDENCE_MIN')) {
+    define('AI_CONFIDENCE_MIN', min(100, max(1, (int) (getenv('AI_CONFIDENCE_MIN') ?: 70))));
+}
 if (!defined('OLLAMA_MODEL')) {
     $ollamaModelEnv = getenv('OLLAMA_MODEL');
     define('OLLAMA_MODEL', $ollamaModelEnv === false ? 'qwen3:8b' : $ollamaModelEnv);
