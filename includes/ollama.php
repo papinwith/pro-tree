@@ -41,7 +41,11 @@ function ollamaGenerateText(string $model, string $prompt, float $budgetSeconds,
             'think' => false,
             'options' => ['temperature' => 0.2],
         ]),
-        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+        CURLOPT_HTTPHEADER => array_merge(
+            ['Content-Type: application/json'],
+            // Only needed when Ollama sits behind an authenticating proxy (see tools/ollama_auth_proxy.py).
+            OLLAMA_API_KEY !== '' ? ['Authorization: Bearer ' . OLLAMA_API_KEY] : []
+        ),
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT_MS => max(300, (int) round($budgetSeconds * 1000)),
         // Fail fast when Ollama simply isn't running.

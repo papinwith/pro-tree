@@ -69,6 +69,11 @@ if (!defined('APP_BASE_URL')) {
 if (!defined('OLLAMA_URL')) {
     define('OLLAMA_URL', rtrim(getenv('OLLAMA_URL') ?: 'http://localhost:11434', '/'));
 }
+// Shared secret sent as `Authorization: Bearer ...` — set it when Ollama is reached through
+// tools/ollama_auth_proxy.py (e.g. a tunnel from a deployed site back to your own machine).
+if (!defined('OLLAMA_API_KEY')) {
+    define('OLLAMA_API_KEY', (string) (getenv('OLLAMA_API_KEY') ?: ''));
+}
 if (!defined('OLLAMA_MODEL')) {
     $ollamaModelEnv = getenv('OLLAMA_MODEL');
     define('OLLAMA_MODEL', $ollamaModelEnv === false ? 'qwen3:8b' : $ollamaModelEnv);
