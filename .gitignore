@@ -31,3 +31,9 @@ issu.md
 ml/live_viewer.py
 ml/viewer.html
 ml/__pycache__/
+
+ml/data_sea/
+ml/data_sea_fetch.log
+ml/species_sea.csv.bak
+ml/train_monitor.py
+ml/train_monitor.html

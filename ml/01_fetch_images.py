@@ -76,13 +76,18 @@ def with_retries(fn, *args, tries=4):
 
 
 def main() -> None:
+    global DATA
     ap = argparse.ArgumentParser()
     ap.add_argument("--per-species", type=int, default=40)
     ap.add_argument("--min-side", type=int, default=224, help="skip photos smaller than this")
+    ap.add_argument("--species", default=str(ROOT / "species.csv"), help="species CSV (needs a scientific column; taxon_key is used if present)")
+    ap.add_argument("--data", default=str(DATA), help="folder for photos and images.csv")
+    ap.add_argument("--threads", type=int, default=16)
     args = ap.parse_args()
 
-    species = list(csv.DictReader(open(ROOT / "species.csv", encoding="utf-8-sig")))
-    DATA.mkdir(exist_ok=True)
+    DATA = Path(args.data)
+    species = list(csv.DictReader(open(args.species, encoding="utf-8-sig")))
+    DATA.mkdir(parents=True, exist_ok=True)
     index_path = DATA / "images.csv"
     rows = list(csv.DictReader(open(index_path, encoding="utf-8"))) if index_path.exists() else []
     have = {}
@@ -97,7 +102,7 @@ def main() -> None:
             print(f"skip   {binomial}: already {have[binomial]}")
             continue
         try:
-            key = with_retries(taxon_key, binomial.replace(" sp.", ""))  # "Vanda sp." -> whole genus
+            key = int(sp["taxon_key"]) if sp.get("taxon_key") else with_retries(taxon_key, binomial.replace(" sp.", ""))  # "Vanda sp." -> whole genus
         except requests.RequestException as e:
             print(f"FAILED {binomial}: {type(e).__name__} - run the script again to retry")
             continue
@@ -128,7 +133,7 @@ def main() -> None:
             img.thumbnail((512, 512))
             return img
 
-        with ThreadPoolExecutor(max_workers=8) as pool:
+        with ThreadPoolExecutor(max_workers=args.threads) as pool:
             for c, img in zip(cands, pool.map(grab, cands)):
                 if img is None or got >= args.per_species:
                     continue
