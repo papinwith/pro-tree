@@ -1,12 +1,13 @@
 <?php
-// Google Gemini AI translation — server-side only. Admin only ever enters
+// Local Ollama (qwen3) AI translation — server-side only. Admin only ever enters
 // Thai content (species_form.php); English/Chinese are generated
 // automatically the first time a visitor views a tree page in that
 // language, then cached on the species row so later visitors reuse it
-// instead of calling Gemini again. Falls back to Thai silently if AI is
+// instead of calling the model again. Falls back to Thai silently if AI is
 // disabled or the call fails — nothing on the public page ever errors out
 // over a translation problem.
 require_once __DIR__ . '/functions.php';
+require_once __DIR__ . '/ollama.php';
 
 /** Species fields eligible for AI translation, in display order. Thai is
  *  always the source; name_scientific is deliberately excluded — Latin
@@ -26,14 +27,14 @@ function translatableSpeciesFields(): array
 }
 
 /**
- * Calls Gemini once with every non-empty Thai field and asks for a single
+ * Calls the model once with every non-empty Thai field and asks for a single
  * structured JSON response covering all of them, for only the requested
  * target language(s) — so viewing a tree in English never pays to also
  * translate Chinese nobody asked for yet.
  * Returns ['en' => ['field' => text, ...]] (and/or 'zh') or null on any
  * failure (network error, bad status, malformed response).
  */
-function geminiTranslateFields(array $thaiFieldsByKey, array $targetLangs): ?array
+function aiTranslateFields(array $thaiFieldsByKey, array $targetLangs): ?array
 {
     if (!AI_ENABLED || !$thaiFieldsByKey || !$targetLangs) {
         return null;
@@ -58,62 +59,18 @@ function geminiTranslateFields(array $thaiFieldsByKey, array $targetLangs): ?arr
     $prompt = "You are translating Thai plant/tree catalog content into {$langLabel} for a public information page.\n"
         . "Translate EVERY field below from Thai into {$langLabel}.\n"
         . "Preserve scientific names, proper nouns, and botanical terminology exactly where they appear — do not attempt to translate Latin binomials.\n"
+        . "A Thai plant's common name (for example the `name` field) is NOT a proper noun to leave in Thai: give its usual {$langLabel} common name, and only if none exists, a transliteration.\n"
         . "Keep the tone factual and concise, matching the source.\n\n"
         . "Fields:\n" . implode("\n", $fieldList) . "\n\n"
         . "Respond with ONLY a JSON object of this exact shape (no markdown fences, no commentary):\n"
         . '{' . implode(', ', $shape) . '}' . "\n"
         . "Include every field key listed above.";
 
-    $body = json_encode([
-        'contents' => [['parts' => [['text' => $prompt]]]],
-        'generationConfig' => ['response_mime_type' => 'application/json'],
-    ]);
-
-    $url = 'https://generativelanguage.googleapis.com/v1beta/models/' . rawurlencode(GEMINI_MODEL)
-        . ':generateContent';
-
-    $ch = curl_init($url);
-    $curlOpts = [
-        CURLOPT_POST => true,
-        CURLOPT_POSTFIELDS => $body,
-        // Newer Gemini API keys (the "AQ...." format issued by current AI
-        // Studio) are rejected with 401 ACCESS_TOKEN_TYPE_UNSUPPORTED when
-        // sent as the old `?key=` query param — Google's own current docs
-        // send it as this header instead. The header form also works fine
-        // with the older AIzaSy... key format, so this isn't a breaking
-        // change for anyone already using that.
-        CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'X-goog-api-key: ' . GEMINI_API_KEY],
-        CURLOPT_RETURNTRANSFER => true,
-        // A species with all 8 translatable fields filled in (a few hundred
-        // words of Thai) has been observed taking ~20s for Gemini to
-        // translate in one call — right at the edge of a 20s timeout, so
-        // that ended up intermittently failing (and silently falling back
-        // to Thai) on exactly the richest, most-worth-translating rows.
-        CURLOPT_TIMEOUT => 45,
-    ];
-    // generativelanguage.googleapis.com resolves IPv6-first; on a host/
-    // network where outbound IPv6 is misconfigured or blackholed, curl
-    // silently hangs the full timeout trying that address before ever
-    // reaching Google, and every translation quietly no-ops via the
-    // catch-all failure fallback below. Forcing IPv4 sidesteps that, but
-    // only opt-in (GEMINI_FORCE_IPV4) — unconditionally forcing it would be
-    // actively worse on a host where IPv4 is the restricted/slower path.
-    if (GEMINI_FORCE_IPV4) {
-        $curlOpts[CURLOPT_IPRESOLVE] = CURL_IPRESOLVE_V4;
-    }
-    curl_setopt_array($ch, $curlOpts);
-    $response = curl_exec($ch);
-    $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $curlError = curl_error($ch);
-    curl_close($ch);
-
-    if ($response === false || $curlError || $status !== 200) {
-        return null;
-    }
-
-    $decoded = json_decode($response, true);
-    $innerText = $decoded['candidates'][0]['content']['parts'][0]['text'] ?? null;
-    if (!is_string($innerText)) {
+    // A species with all 8 translatable fields filled in (a few hundred words
+    // of Thai) can take a local 8B model a minute or more, plus extra on the
+    // first call while it loads into memory.
+    $innerText = ollamaGenerateText(OLLAMA_MODEL, $prompt, 180);
+    if ($innerText === null) {
         return null;
     }
 
@@ -128,7 +85,7 @@ function geminiTranslateFields(array $thaiFieldsByKey, array $targetLangs): ?arr
 /**
  * Ensures every translatable field on this species has cached text for
  * $lang ('en'|'zh'). Only fields still empty for that language are sent
- * to Gemini — already-cached values are left untouched, so this is cheap
+ * to the model — already-cached values are left untouched, so this is cheap
  * on every request after the first. Persists results onto the species row
  * (species.{field}_{lang}) so future visitors reuse the cache, and returns
  * the (possibly updated) $species/$tree array with translations merged in
@@ -156,9 +113,9 @@ function ensureSpeciesTranslated(PDO $pdo, array $species, string $lang): array
         return $species; // fully cached already, or nothing to translate
     }
 
-    $translated = geminiTranslateFields($missing, [$lang]);
+    $translated = aiTranslateFields($missing, [$lang]);
     if ($translated === null || !isset($translated[$lang]) || !is_array($translated[$lang])) {
-        return $species; // Gemini unavailable — caller renders the Thai fallback as-is
+        return $species; // AI unavailable — caller renders the Thai fallback as-is
     }
 
     $updates = [];
@@ -226,7 +183,7 @@ function ensureZoneTranslated(PDO $pdo, int $zoneId, string $lang): array
         return $zone;
     }
 
-    $translated = geminiTranslateFields($missing, [$lang]);
+    $translated = aiTranslateFields($missing, [$lang]);
     if ($translated === null || !isset($translated[$lang]) || !is_array($translated[$lang])) {
         return $zone;
     }
@@ -278,7 +235,7 @@ function ensureCategoryTranslated(PDO $pdo, string $categoryCode, string $lang):
         return $category; // nothing to translate, or already cached
     }
 
-    $translated = geminiTranslateFields(['name' => $thaiValue], [$lang]);
+    $translated = aiTranslateFields(['name' => $thaiValue], [$lang]);
     $text = $translated[$lang]['name'] ?? null;
     if (!is_string($text) || trim($text) === '') {
         return $category;
@@ -312,7 +269,7 @@ function ensureSettingTranslated(PDO $pdo, string $settingKey, string $thaiValue
         return $cached;
     }
 
-    $translated = geminiTranslateFields([$settingKey => $thaiValue], [$lang]);
+    $translated = aiTranslateFields([$settingKey => $thaiValue], [$lang]);
     $text = $translated[$lang][$settingKey] ?? null;
     if (!is_string($text) || trim($text) === '') {
         return $thaiValue;

@@ -62,6 +62,7 @@ name/description/care instructions/characteristics content is entered
 | name / name_en / name_zh | VARCHAR(150) | Thai is the required default; EN/ZH fall back to it when blank |
 | name_common | VARCHAR(150) NULL | ชื่อสามัญ |
 | name_scientific | VARCHAR(150) NULL | ชื่อวิทยาศาสตร์ — Latin binomial, not localized |
+| image_path | VARCHAR(255) NULL | photo of the species itself (not a specific tree) — the public tree page and zone listing fall back to it when a tree has no `trees.image_path` of its own. Set on the species form; deleted with the species |
 | description / description_en / description_zh | TEXT | |
 | care_instructions / _en / _zh | TEXT NULL | วิธีดูแล — watering/sunlight/soil etc. |
 | characteristics / _en / _zh | TEXT NULL | shown as its own section on the plant page, hidden if blank |
@@ -105,8 +106,8 @@ in both when relevant.
 | plant_code_updated_at | DATETIME NULL | stamped whenever plant_code changes — admin UI uses this to prompt a reprint |
 | label | VARCHAR(150) NULL | optional staff-facing nickname to tell individuals of the same species apart |
 | status | ENUM('healthy','needs_attention','removed') | plant-asset status, independent of `is_active` (public visibility) |
-| image_path | VARCHAR(255) | path/URL to this specimen's photo |
-| map_image_path | VARCHAR(255) NULL | optional per-tree map override |
+| image_path | VARCHAR(255) | path/URL to this specimen's photo. Trees bulk-created together share ONE file, so it is only unlinked once no tree/species still references it (`deletePublicFileIfUnreferenced()`) |
+| map_image_path | VARCHAR(255) NULL | optional per-tree map override (shared across a bulk-created batch, same rule as `image_path`) |
 | map_url | VARCHAR(255) NULL | optional per-tree map link override |
 | latitude / longitude | DECIMAL(10,7) NULL | current physical location; see §4b |
 | location_updated_at | DATETIME NULL | set whenever latitude/longitude change |
@@ -245,8 +246,20 @@ email-capture case.)
 - **IP is not identity.** `ip_address` is stored on both `visitors` (last known) and `tree_scans` (per-event) purely for auditing/abuse analysis. The unique-visitor count is always based on `visitor_uuid`, never IP.
 - **Admin/visitor separation.** `admins` has no foreign key relationship to `visitors`, `tree_scans`, or `tree_interests`. Admin session middleware and visitor cookie logic are entirely independent code paths.
 - **Scan vs. visit semantics.** "Scan" and "page view" are treated as the same event here — each `GET /tree/{id}` writes a `tree_scans` row. If future requirements need to distinguish QR-scan-origin traffic from prev/next-navigation traffic, add a `source` ENUM(`qr`,`nav`,`direct`) column to `tree_scans`.
-- **Species/zone content vs. plant-asset data.** Anything true of *every* individual of a species (name, care instructions, characteristics) lives on `species`; anything true of *this one specimen* (photo, location, status) lives on `trees`. Editing a species' description updates every tree that references it at once — this is deliberate, not a duplication bug.
+- **Species/zone content vs. plant-asset data.** Anything true of *every* individual of a species (name, care instructions, characteristics) lives on `species`; anything true of *this one specimen* (its own photo, location, status) lives on `trees`. `species.image_path` is the one deliberate exception: a general photo of the species that trees without a photo of their own fall back to. Editing a species' description updates every tree that references it at once — this is deliberate, not a duplication bug.
 - **Not yet implemented** (see the project proposal): `observations` (growth/health history), `maintenance_logs` (care activity log), `nursery_stock` (sales qty/price/status), and a richer `tree_interests` with lead status/activity type. These are separate future migrations, not stubbed out here.
+- **Delete rules (what happens when you delete something that is in use).** The rule across the admin: a parent that other rows depend on is *refused*, never silently emptied — and where merging makes sense, the admin gets a "move to X, then delete" option instead of a dead end.
+
+  | Delete this | If it is in use | What the admin can do |
+  |---|---|---|
+  | Category / Subtype | refused while species use it | "move to another, then delete" (`category_delete.php`, `subtype_delete.php`) |
+  | **Species** | refused while trees, planting plans **or recorded sales** use it | "move to another species, then delete" — carries over trees (plant_code recomputed), plans, stock, sales, products (`reassignSpeciesAndDelete()`); the delete button is hidden and replaced by that option |
+  | Zone | refused while trees **or planting plans** use it | remove/move them first |
+  | Tree | always deletable | takes its observations, maintenance log, location history and interest leads (`tree_interests`) with it; a `qr_tags` row is kept but unlinked |
+  | Planting plan, stock row, observation, maintenance entry | always deletable | — |
+  | Admin user | never yourself, never the last Programmer | — |
+
+  Sales (`sale_transactions`) are counted as "in use" for a species even though the FK is `ON DELETE CASCADE`: they are the revenue history, so a plain delete must not wipe them. Current stock (`nursery_stock`) is only today's listing and goes away with the species. The usage checks live in `speciesUsageCount()` / `zoneUsageCount()`; the list pages also treat a foreign-key refusal (`23000`) that slips past the count as "skipped" rather than crashing.
 - **Two deliberately different ID schemes coexist on `trees`.** `id`/Tree ID (§4a) is the routing/QR-link identity and never changes. `plant_code` (§4c) is a printed classification+location label and is expected to change (with a reprint) when the plant moves. Don't conflate them when reading the code — a function named `assetCode()` is about the former, `computePlantCode()`/`recomputeTreePlantCode()` about the latter.
 
 ## 10. Expo-integration tables (added in migrations 0007–0012)
@@ -281,5 +294,5 @@ per row; this table is an index into those, not a duplicate of them.
 | `plant_location_history.from_origin_id`/`to_origin_id` (new columns) | Extends the existing move-history table to also snapshot origin changes | [`tree-identity-and-relationships.md`](tree-identity-and-relationships.md) §5 |
 | `tree_scans.scan_lat`/`scan_lng`/`gps_accuracy_m`/`gps_available` (new columns) | Visitor's GPS position at scan time, opt-in, never blocks the scan if denied | [`tree-identity-and-relationships.md`](tree-identity-and-relationships.md) §6 |
 | `tree_scans.registered_zone_id`/`registered_lat`/`registered_lng` (new columns) | **Snapshot** of the tree's registered location *at scan time* — keeps historical scan records accurate after a later tree move, per this project's explicit "tree movement must not destroy historical scan location records" requirement | same |
-| `translation_drafts` (new) | Holds pending AI-generated (Gemini) translations for admin review before they overwrite `species.*_en`/`*_zh` | [`multilingual-and-ai-translation.md`](multilingual-and-ai-translation.md) §2 |
+| `translation_drafts` (new) | Holds pending AI-generated (Ollama) translations for admin review before they overwrite `species.*_en`/`*_zh` | [`multilingual-and-ai-translation.md`](multilingual-and-ai-translation.md) §2 |
 | `zones.center_lat`/`center_lng`/`boundary_geojson` (new columns) | Interactive map zone boundaries/center points, distinct from the existing simple map-banner settings | [`map-system.md`](map-system.md) §1 |

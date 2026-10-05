@@ -15,7 +15,8 @@ A web-based system where visitors scan a QR Code on a tree and land on that tree
 - [`docs/user-flow.md`](docs/user-flow.md) — visitor and admin user flows (with diagrams)
 - [`docs/rbac.md`](docs/rbac.md) — role hierarchy, permission taxonomy, and access-control design (Programmer / Executive / Tree Admin / Visitor)
 - [`docs/tree-identity-and-relationships.md`](docs/tree-identity-and-relationships.md) — Tree ID vs. location vs. zone vs. relationship vs. scan-location, QR flow, GPS scan tracking
-- [`docs/multilingual-and-ai-translation.md`](docs/multilingual-and-ai-translation.md) — TH/EN/ZH content model + Google Gemini AI translation review flow
+- [`docs/multilingual-and-ai-translation.md`](docs/multilingual-and-ai-translation.md) — TH/EN/ZH content model + Local Ollama AI translation review flow
+- [`docs/ai-plant-identification.md`](docs/ai-plant-identification.md) — "what tree is this?" — AI identifies a tree from its photo (Ollama vision)
 - [`docs/map-system.md`](docs/map-system.md) — map banner (existing) vs. interactive zone/tree map (new)
 - [`docs/visitor-identity.md`](docs/visitor-identity.md) — how visitor identity, scan dedup, and repeat-scan detection works
 
@@ -45,4 +46,3 @@ docs/       design docs, install.sql (run this), migrations/
 See [`SETUP.md`](SETUP.md) to get it running.
 
 Seed admin login: **admin** / **ChangeMe123!** — change this immediately in production (see `SETUP.md`).
-

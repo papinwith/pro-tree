@@ -81,7 +81,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <div class="admin-wrap admin-wrap-narrow">
   <p><a class="btn-outline btn-sm" href="subtypes.php">&larr; กลับไปหน้าชนิด</a></p>
   <h1><?= $subtype ? 'แก้ไข' : 'เพิ่ม' ?>ชนิด</h1>
-  <p class="field-hint">กรอกเป็นภาษาไทยอย่างเดียว — ระบบจะแปลเป็นอังกฤษ/จีนให้อัตโนมัติตอนผู้เข้าชมเปิดหน้าต้นไม้ด้วยภาษานั้น<?= AI_ENABLED ? '' : ' (ต้องตั้งค่า Gemini API key ก่อน — ดูที่หน้า <a href="settings.php#ai-translation">ตั้งค่า</a>)' ?></p>
+  <p class="field-hint">กรอกเป็นภาษาไทยอย่างเดียว — ระบบจะแปลเป็นอังกฤษ/จีนให้อัตโนมัติตอนผู้เข้าชมเปิดหน้าต้นไม้ด้วยภาษานั้น<?= AI_ENABLED ? '' : ' (ปิดการแปลด้วย AI อยู่ — ดูที่หน้า <a href="settings.php#ai-translation">ตั้งค่า</a>)' ?></p>
 
   <?php foreach ($errors as $err): ?>
     <div class="flash error"><?= e($err) ?></div>

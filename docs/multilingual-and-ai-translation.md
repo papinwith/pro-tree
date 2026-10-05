@@ -1,4 +1,4 @@
-# Multilingual Content & Google Gemini AI Translation
+# Multilingual Content & Ollama AI Translation
 
 Design only — no application code yet.
 
@@ -22,7 +22,7 @@ per-specimen text stays limited to the existing `trees.label` field.
 
 The triplicated-column model is fine for *storing* a finished translation,
 but has no place to hold a **pending, unreviewed** AI draft — writing
-straight into `species.name_en` the moment Gemini responds would violate
+straight into `species.name_en` the moment Ollama responds would violate
 the brief's explicit rule ("AI must NOT automatically overwrite... admin
 must review and edit before saving"). A new table holds drafts until
 approved:
@@ -58,7 +58,7 @@ Tree Admin enters/edits Thai content on species_form.php
 Clicks "AI Translate" ──► POST includes/translation.php (server-side only)
         │
         ▼
-Gemini API called with the Thai source text + a structured-output
+Ollama API called with the Thai source text + a structured-output
 instruction (see §4) — scientific names and proper nouns flagged
 to preserve, not translate
         │
@@ -82,9 +82,9 @@ or species.*_zh,    a manual translation directly into the
 status='approved'   form field instead
 ```
 
-## 4. Structured Gemini Request/Response Contract
+## 4. Structured Ollama Request/Response Contract
 
-Request instructs Gemini to return exactly this shape (matches the
+Request instructs Ollama to return exactly this shape (matches the
 brief's example) so the backend never has to parse free-form prose:
 
 ```json
@@ -98,7 +98,7 @@ brief's example) so the backend never has to parse free-form prose:
 exists in the form the admin just typed.)
 
 **Preserve, don't translate:** the request prompt explicitly instructs
-Gemini to keep scientific names (Latin binomials, e.g. *Cassia fistula*)
+Ollama to keep scientific names (Latin binomials, e.g. *Cassia fistula*)
 and other proper nouns untouched — these already live in a separate column
 (`species.name_scientific`) that isn't sent through translation at all,
 which is the simplest way to guarantee they're never mistranslated: don't
@@ -113,8 +113,8 @@ so they can be reviewed/approved independently.
 
 ## 5. Security & Error Handling
 
-- **API key never reaches the browser.** `includes/translation.php` is the
-  only file that holds `GEMINI_API_KEY` (from `config/config.php`, env-
+- **No API key; calls are server-side only.** `includes/translation.php` is the
+  only file that holds `OLLAMA_URL` (from `config/config.php`, env-
   sourced, not committed — same convention as `DB_PASS`). All calls happen
   server-side, triggered by an admin session request, never a public one.
 - **Gated by permission**, not just role convenience: `translation.request`
@@ -122,14 +122,14 @@ so they can be reviewed/approved independently.
   a draft) are separate permissions — see [`rbac.md`](rbac.md) §3/§4 update.
   `gemini.config.manage` (API key/model settings) is Programmer-only and
   distinct from general `settings.manage`, matching the brief's explicit
-  "Tree Admin must NOT modify Gemini API credentials."
-- **Graceful degradation:** if the Gemini API is unavailable, times out, or
+  "Tree Admin must NOT modify Ollama API credentials."
+- **Graceful degradation:** if the Ollama API is unavailable, times out, or
   returns malformed output, `includes/translation.php` catches the failure
   and the UI falls back to plain manual text inputs for `_en`/`_zh` — the
   admin can always type a translation by hand regardless of API state. No
   part of the save flow for `species_form.php` should ever hard-depend on
-  Gemini succeeding.
-- **Rate/cost control:** since translation is a paid external call,
+  Ollama succeeding.
+- **Rate/cost control:** since translation occupies the local model,
   `admin/translations.php` should show existing `pending` drafts before
   allowing a fresh translate request for the same entity+field (avoid
   accidental duplicate spend on repeated clicks). `storage/translation_cache/`

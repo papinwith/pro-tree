@@ -96,14 +96,40 @@ function can(string $permissionKey): bool
     if (empty($_SESSION['admin_role_id'])) {
         return false;
     }
-    $stmt = db()->prepare(
-        'SELECT 1 FROM role_permissions rp
-         JOIN permissions p ON p.id = rp.permission_id
-         WHERE rp.role_id = :role_id AND p.permission_key = :key
-         LIMIT 1'
-    );
-    $stmt->execute(['role_id' => $_SESSION['admin_role_id'], 'key' => $permissionKey]);
-    return (bool) $stmt->fetchColumn();
+    return in_array($permissionKey, rolePermissionKeys((int) $_SESSION['admin_role_id']), true);
+}
+
+/**
+ * All permission keys of a role, read once per request and reused by every
+ * can()/canAny() call after it — a page checks a dozen or more permissions
+ * (one per button), and each separate query was a full database round trip.
+ * Still fresh on every request, so a role change applies on the very next one.
+ */
+function rolePermissionKeys(int $roleId): array
+{
+    static $cache = [];
+    if (!isset($cache[$roleId])) {
+        $stmt = db()->prepare(
+            'SELECT p.permission_key FROM role_permissions rp
+             JOIN permissions p ON p.id = rp.permission_id
+             WHERE rp.role_id = :role_id'
+        );
+        $stmt->execute(['role_id' => $roleId]);
+        $cache[$roleId] = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    }
+    return $cache[$roleId];
+}
+
+/**
+ * True if the current admin holds ANY of the given permissions (shares the
+ * once-per-request permission read with can()).
+ */
+function canAny(array $permissionKeys): bool
+{
+    if (empty($_SESSION['admin_role_id']) || !$permissionKeys) {
+        return false;
+    }
+    return (bool) array_intersect($permissionKeys, rolePermissionKeys((int) $_SESSION['admin_role_id']));
 }
 
 /**
@@ -146,6 +172,39 @@ function csrfField(): string
 }
 
 /**
+ * True when the request body was bigger than PHP's post_max_size, in which
+ * case PHP silently drops $_POST and $_FILES. A non-form body (e.g. JSON) also
+ * leaves them empty, so the size is compared to the limit rather than assumed.
+ */
+function postBodyExceededLimit(): bool
+{
+    if (!empty($_POST) || !empty($_FILES)) {
+        return false;
+    }
+    $length = (int) ($_SERVER['CONTENT_LENGTH'] ?? 0);
+    $limit = iniSizeToBytes((string) ini_get('post_max_size'));
+    return $length > 0 && $limit > 0 && $length > $limit;
+}
+
+/** "8M" / "512K" / "1G" / "2048" (php.ini shorthand) -> bytes; 0 when empty or unlimited. */
+function iniSizeToBytes(string $value): int
+{
+    $value = trim($value);
+    $bytes = (int) $value;
+    switch (strtolower(substr($value, -1))) {
+        case 'g':
+            $bytes *= 1024;
+            // no break
+        case 'm':
+            $bytes *= 1024;
+            // no break
+        case 'k':
+            $bytes *= 1024;
+    }
+    return max(0, $bytes);
+}
+
+/**
  * Call as the first line of every POST handler in admin/*.php, before
  * touching $_POST for anything else. Rejects the request outright rather
  * than falling through, so a missing/forged token can't reach any DB write.
@@ -153,6 +212,13 @@ function csrfField(): string
 function requireCsrf(): void
 {
     startAdminSession();
+    // A body over post_max_size makes PHP drop $_POST and $_FILES entirely —
+    // the token is missing too, so say what actually went wrong.
+    if (postBodyExceededLimit()) {
+        http_response_code(413);
+        echo 'ไฟล์ที่แนบมีขนาดใหญ่เกินไป (รูปละไม่เกิน 10 MB) กรุณาย้อนกลับแล้วเลือกรูปที่เล็กลง';
+        exit;
+    }
     $submitted = $_POST['csrf_token'] ?? '';
     if (!is_string($submitted) || empty($_SESSION['csrf_token']) || !hash_equals($_SESSION['csrf_token'], $submitted)) {
         http_response_code(400);
@@ -228,12 +294,16 @@ const LOGIN_GENERIC_ERROR = 'ชื่อผู้ใช้หรือรหั
  *
  * One SELECT does both the lock check and the credential fetch (not two
  * separate queries), and the failure path is a single atomic UPDATE rather
- * than a read-modify-write — MySQL evaluates a single-table UPDATE's SET
- * clauses left to right, so `locked_until` below sees failed_login_attempts'
- * own just-incremented value (not the pre-update one) without needing to
- * add 1 again itself. A read-then-write here would let concurrent guesses
- * race the counter and take far more than LOGIN_LOCKOUT_THRESHOLD tries to
- * actually lock.
+ * than a read-modify-write — a read-then-write here would let concurrent
+ * guesses race the counter and take far more than LOGIN_LOCKOUT_THRESHOLD
+ * tries to actually lock. The new failed_login_attempts value is computed
+ * with the same CASE expression in both SET clauses (rather than having
+ * `locked_until` reference the other clause's result) because — unlike
+ * MySQL, which evaluates a single-table UPDATE's SET clauses left to right
+ * so a later one can see an earlier one's just-written value — Postgres
+ * evaluates every SET expression against the pre-update row, so
+ * `locked_until` would otherwise check the OLD attempt count and lock the
+ * account one attempt later than intended.
  *
  * Returns null on success (session is set up); otherwise LOGIN_GENERIC_ERROR
  * for admin/login.php to show as-is.
@@ -274,12 +344,20 @@ function attemptAdminLogin(PDO $pdo, string $username, string $password): ?strin
     if ($admin) {
         $pdo->prepare(
             'UPDATE admins
-             SET failed_login_attempts = IF(:priorLockExpired, 1, failed_login_attempts + 1),
-                 locked_until = IF(failed_login_attempts >= :threshold,
-                                    DATE_ADD(NOW(), INTERVAL :minutes MINUTE), NULL)
+             SET failed_login_attempts = CASE WHEN :priorLockExpired = 1 THEN 1 ELSE failed_login_attempts + 1 END,
+                 locked_until = CASE
+                                     WHEN (CASE WHEN :priorLockExpired2 = 1 THEN 1 ELSE failed_login_attempts + 1 END) >= :threshold
+                                     THEN NOW() + (INTERVAL \'1 minute\' * :minutes)
+                                     ELSE NULL
+                                 END
              WHERE id = :id'
         )->execute([
             'priorLockExpired' => $priorLockExpired ? 1 : 0,
+            // Same value as priorLockExpired, bound under its own name rather
+            // than reused — PDO's native (non-emulated) prepare for pgsql
+            // doesn't reliably support one named placeholder appearing twice
+            // in the same query.
+            'priorLockExpired2' => $priorLockExpired ? 1 : 0,
             'threshold' => LOGIN_LOCKOUT_THRESHOLD,
             'minutes' => LOGIN_LOCKOUT_MINUTES,
             'id' => $admin['id'],

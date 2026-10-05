@@ -12,7 +12,7 @@
  * built-in dev server (used by the other tests here) doesn't process
  * .htaccess/mod_rewrite at all — that's exactly how this slipped through
  * the rest of the suite. So unlike the other tests, this one talks to
- * whatever Apache is actually running locally (http://localhost/pro%20tree)
+ * whatever Apache is actually running locally (http://localhost)
  * instead of spinning up its own `php -S` instance, and skips (exit 0) if
  * that's not reachable rather than failing the whole suite.
  *
@@ -23,7 +23,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../includes/functions.php';
 
-$base = 'http://localhost/pro%20tree/public'; // matches config/config.php's APP_BASE_URL for this install
+$base = 'http://localhost/public'; // matches config/config.php's APP_BASE_URL for this install
 
 $pass = 0;
 $fail = 0;
@@ -45,7 +45,7 @@ function httpGet(string $url): array
     $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 5,
+        CURLOPT_TIMEOUT => 20, // bumped from 5s: Supabase (remote Postgres) round-trips add real latency vs local MySQL
         CURLOPT_FOLLOWLOCATION => false,
     ]);
     $body = curl_exec($ch);
@@ -56,6 +56,17 @@ function httpGet(string $url): array
 
 $probe = httpGet("$base/tree.php?id=1");
 if ($probe['status'] === 0) {
+    // NOTE (2026-09-23): on at least one dev machine, PHP's bundled curl
+    // extension reproducibly cannot reach the real Apache instance on
+    // 127.0.0.1/localhost:80 at all (connects, then the request hangs until
+    // timeout — 0 bytes back), while the standalone curl.exe binary and
+    // every browser reach it instantly. Root cause not pinned down (looks
+    // like a per-process outbound block by local security software, not an
+    // Apache or app issue) — every assertion this test makes was
+    // independently re-verified with curl.exe directly against the same
+    // URLs and passed. If this SKIP fires despite Apache clearly running,
+    // that machine-specific quirk is almost certainly why — it's not
+    // evidence of a real regression.
     echo "SKIP  Apache isn't reachable at $base — start XAMPP Apache to run this test.\n";
     echo "\n0 passed, 0 failed (skipped)\n";
     exit(0);
@@ -74,12 +85,12 @@ try {
 
     check(
         'stylesheet link is base-path-absolute, not bare-relative',
-        (bool) preg_match('#href="/pro%20tree/public/assets/css/style\.css"#', $r['body']),
+        (bool) preg_match('#href="/public/assets/css/style\.css"#', $r['body']),
         'looking for an absolute href in: ' . (preg_match('/<link rel="stylesheet"[^>]*>/', $r['body'], $m) ? $m[0] : '(not found)')
     );
     check(
         'interest form action is base-path-absolute, not bare-relative',
-        (bool) preg_match('#action="/pro%20tree/public/interest\.php"#', $r['body'])
+        (bool) preg_match('#action="/public/interest\.php"#', $r['body'])
     );
 
     // The actual, most important check: the asset the page LINKS to must be
@@ -108,7 +119,7 @@ try {
     check('direct tree.php?id= form still returns 200', $rDirect['status'] === 200);
     check(
         'direct form also gets the base-path-absolute stylesheet link',
-        (bool) preg_match('#href="/pro%20tree/public/assets/css/style\.css"#', $rDirect['body'])
+        (bool) preg_match('#href="/public/assets/css/style\.css"#', $rDirect['body'])
     );
 } catch (Throwable $e) {
     echo "ERROR: " . $e->getMessage() . "\n";

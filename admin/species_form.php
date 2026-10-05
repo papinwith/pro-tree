@@ -14,6 +14,11 @@ if ($id && !$species) {
 $errors = [];
 $categories = getAllCategories($pdo);
 $subtypes = getAllSubtypes($pdo);
+require_once __DIR__ . '/../includes/plant_identify.php';
+// Hand the AI-identify button what this page just loaded (see warmIdentifyRequest()).
+// The species list (only used to flag "already in the system") is a slower, rarely
+// changing read, so it is refreshed only when the cached copy is getting old.
+warmIdentifyRequest($categories, $subtypes, AI_IDENTIFY_CACHE_SECONDS > 0 && (identifyCacheAge('species') ?? PHP_INT_MAX) > AI_IDENTIFY_CACHE_SECONDS / 2 ? getAllSpecies($pdo) : null);
 $zones = getAllZones($pdo);
 $stockRows = $id ? getStockForSpecies($pdo, $id) : [];
 $stockSizes = getAllStockSizes($pdo);
@@ -37,6 +42,7 @@ if ($id) {
     $existingTreesByZone = $stmt->fetchAll();
 }
 $saleStatusLabels = ['available' => 'พร้อมขาย', 'reserved' => 'จองแล้ว', 'sold_out' => 'ขายหมด', 'not_for_sale' => 'ไม่ขาย'];
+$treeStatuses = ['healthy' => 'สมบูรณ์', 'needs_attention' => 'ต้องดูแล', 'removed' => 'นำออกแล้ว'];
 
 // Thai-only fields. English/Chinese are never entered here — they're
 // generated automatically the first time a visitor views a tree page in
@@ -101,6 +107,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($plantZoneId && !getZoneById($pdo, $plantZoneId)) {
         $errors[] = 'กรุณาเลือกโซนให้ถูกต้อง';
     }
+    // Status every newly-created tree starts with (same choices as
+    // tree_form.php) — only used together with the zone/quantity above.
+    $plantStatus = $_POST['plant_status'] ?? 'healthy';
+    if (!isset($treeStatuses[$plantStatus])) {
+        $errors[] = 'สถานะต้นไม้ไม่ถูกต้อง';
+        $plantStatus = 'healthy';
+    }
+    $willCreateTrees = $plantZoneId && $plantQuantity > 0;
+    // A photo picked for the new trees is meaningless (and would be silently
+    // dropped) if no trees are being created — tell the admin instead.
+    $treeImageChosen = ($_FILES['tree_image']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE;
+    if ($treeImageChosen && !$willCreateTrees) {
+        $errors[] = 'เลือกรูปต้นไม้แล้ว แต่ยังไม่ได้เลือกโซนและจำนวนต้นที่จะเพิ่ม — เลือกโซนและจำนวนต้น หรือเอารูปนี้ออก';
+    }
+
+    // Optional starting stock row, create-only (an existing species manages
+    // its stock in the section further down the page).
+    $stockSizeId = $id ? 0 : validateStockSizeId($pdo, (int) ($_POST['stock_size_id'] ?? 0));
+    $stockQuantity = $id ? 0 : max(0, (int) ($_POST['stock_quantity'] ?? 0));
+    $stockPriceRaw = $id ? '' : trim($_POST['stock_price'] ?? '');
+    $stockPrice = null;
+    if ($stockPriceRaw !== '') {
+        if (!is_numeric($stockPriceRaw) || (float) $stockPriceRaw < 0) {
+            $errors[] = 'ราคาสต็อกต้องเป็นตัวเลขตั้งแต่ 0 ขึ้นไป';
+        } else {
+            $stockPrice = (float) $stockPriceRaw;
+        }
+    }
+    $stockStatus = $_POST['stock_status'] ?? 'not_for_sale';
+    if (!isset($saleStatusLabels[$stockStatus])) {
+        $stockStatus = 'not_for_sale';
+    }
+    $stockChannel = $id ? null : (trim($_POST['stock_channel'] ?? '') ?: null);
+    $addStock = !$id && ($stockSizeId || $stockQuantity > 0 || $stockPrice !== null || $stockChannel !== null);
 
     if ($name === '') {
         $errors[] = 'กรุณาระบุชื่อ';
@@ -137,14 +177,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $classificationId = null;
     }
 
+    // Uploaded photos: the species photo keeps whatever it already had unless
+    // a new one is chosen (or "remove" is ticked); the tree photo is applied
+    // to every tree created below. Files written here must be deleted again
+    // if the save doesn't go through, or they'd be orphaned on disk.
+    $imagePath = $species['image_path'] ?? null;
+    $oldImagePath = $imagePath;
+    $newImagePath = null;
+    $newTreeImagePath = null;
+    if (!$errors) {
+        try {
+            $newImagePath = saveUploadedImage($_FILES['image'] ?? [], 'species');
+            $newTreeImagePath = saveUploadedImage($_FILES['tree_image'] ?? [], 'tree');
+        } catch (RuntimeException $e) {
+            deletePublicFile($newImagePath);
+            $newImagePath = null;
+            $errors[] = $e->getMessage();
+        }
+    }
+    if ($newImagePath !== null) {
+        $imagePath = $newImagePath;
+    } elseif ($id && isset($_POST['remove_image'])) {
+        $imagePath = null;
+    }
+
     if (!$errors) {
         $params = [
             'category_code' => $categoryCode, 'subtype_id' => $subtypeId, 'species_code' => $speciesCode,
             'classification_id' => $classificationId,
             'name' => $name, 'name_common' => $nameCommon, 'name_scientific' => $nameScientific,
+            'image_path' => $imagePath,
             'description' => $description,
         ] + $detailValues;
         $columns = array_keys($params);
+        $createdQrPaths = [];
+        // One transaction for the whole save: species row, subtype links,
+        // plant-code recompute, new trees and starting stock either all land
+        // or none do — a failure partway (e.g. QR generation) used to leave a
+        // half-created species and trees with no QR behind.
+        $pdo->beginTransaction();
         try {
             if ($id) {
                 $setSql = implode(', ', array_map(fn($c) => "$c=:$c", $columns));
@@ -179,37 +250,77 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             // Bulk-create individual tree rows for this species, if requested.
-            if ($plantZoneId && $plantQuantity > 0) {
+            if ($willCreateTrees) {
                 $maxOrder = (int) $pdo->query('SELECT COALESCE(MAX(display_order), 0) FROM trees')->fetchColumn();
                 $insertTree = $pdo->prepare(
-                    'INSERT INTO trees (species_id, zone_id, area_code, display_order, is_active) VALUES (:sp, :z, :a, :o, 1)'
+                    'INSERT INTO trees (species_id, zone_id, area_code, status, image_path, display_order, is_active)
+                     VALUES (:sp, :z, :a, :st, :img, :o, 1)'
                 );
                 for ($i = 1; $i <= $plantQuantity; $i++) {
-                    $insertTree->execute(['sp' => $speciesId, 'z' => $plantZoneId, 'a' => '01', 'o' => $maxOrder + $i]);
+                    $insertTree->execute([
+                        'sp' => $speciesId, 'z' => $plantZoneId, 'a' => '01', 'st' => $plantStatus,
+                        'img' => $newTreeImagePath, 'o' => $maxOrder + $i,
+                    ]);
                     $newTreeId = (int) $pdo->lastInsertId();
                     $qrPath = generateTreeQrCode($newTreeId);
+                    $createdQrPaths[] = $qrPath;
                     $pdo->prepare('UPDATE trees SET qr_code_path = :qr WHERE id = :id')->execute(['qr' => $qrPath, 'id' => $newTreeId]);
                     recomputeTreePlantCode($pdo, $newTreeId);
                 }
             }
 
-            header('Location: species.php');
-            exit;
-        } catch (PDOException $e) {
-            if ($e->getCode() === '23000') {
+            // Starting stock row, if any stock field was filled in.
+            if ($addStock) {
+                $pdo->prepare(
+                    'INSERT INTO nursery_stock (species_id, size_id, quantity, price, sale_status, sales_channel)
+                     VALUES (:sid, :size, :qty, :price, :status, :channel)'
+                )->execute([
+                    'sid' => $speciesId, 'size' => $stockSizeId ?: null, 'qty' => $stockQuantity,
+                    'price' => $stockPrice, 'status' => $stockStatus, 'channel' => $stockChannel,
+                ]);
+            }
+
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            deletePublicFile($newImagePath);
+            deletePublicFile($newTreeImagePath);
+            foreach ($createdQrPaths as $orphanQr) {
+                deletePublicFile($orphanQr);
+            }
+            if ($e instanceof PDOException && $e->getCode() === '23000') {
                 $errors[] = 'ข้อมูลนี้เพิ่งถูกใช้โดยการบันทึกอื่น กรุณาลองใหม่อีกครั้ง';
+                $imagePath = $oldImagePath;
             } else {
                 throw $e;
             }
         }
+
+        if (!$errors) {
+            // Saved — now it's safe to drop the photo this one replaced/removed.
+            if ($oldImagePath && $oldImagePath !== $imagePath) {
+                deletePublicFile($oldImagePath);
+            }
+            header('Location: species.php');
+            exit;
+        }
+    } else {
+        // Validation failed after a file was already stored — don't leave it behind.
+        deletePublicFile($newImagePath);
+        deletePublicFile($newTreeImagePath);
+        $imagePath = $oldImagePath;
     }
 
     $species = array_merge($species ?? [], [
         'category_code' => $categoryCode, 'subtype_id' => $subtypeId, 'species_code' => $speciesCode,
         'classification_id' => $classificationId,
         'name' => $name, 'name_common' => $nameCommon, 'name_scientific' => $nameScientific,
-        'description' => $description,
-        'plant_zone_id' => $plantZoneId, 'plant_quantity' => $plantQuantity,
+        'description' => $description, 'image_path' => $imagePath,
+        'plant_zone_id' => $plantZoneId, 'plant_quantity' => $plantQuantity, 'plant_status' => $plantStatus,
+        'stock_size_id' => $stockSizeId, 'stock_quantity' => $stockQuantity, 'stock_price' => $stockPriceRaw,
+        'stock_status' => $stockStatus, 'stock_channel' => $stockChannel,
     ] + $detailValues);
 }
 
@@ -229,7 +340,7 @@ $currentClassificationId = $species['classification_id'] ?? '';
 <div class="admin-wrap admin-wrap-narrow">
   <p><a class="btn-outline btn-sm" href="species.php">&larr; กลับไปหน้าชนิดพันธุ์</a></p>
   <h1><?= $id ? 'แก้ไขชนิดพันธุ์' : 'เพิ่มชนิดพันธุ์' ?></h1>
-  <p class="field-hint">กรอกเป็นภาษาไทยอย่างเดียว — ระบบจะแปลเป็นอังกฤษ/จีนให้อัตโนมัติตอนผู้เข้าชมเปิดหน้าต้นไม้ด้วยภาษานั้น<?= AI_ENABLED ? '' : ' (ต้องตั้งค่า Gemini API key ก่อน — ดูที่หน้า <a href="settings.php#ai-translation">ตั้งค่า</a>)' ?></p>
+  <p class="field-hint">กรอกเป็นภาษาไทยอย่างเดียว — ระบบจะแปลเป็นอังกฤษ/จีนให้อัตโนมัติตอนผู้เข้าชมเปิดหน้าต้นไม้ด้วยภาษานั้น<?= AI_ENABLED ? '' : ' (ปิดการแปลด้วย AI อยู่ — ดูที่หน้า <a href="settings.php#ai-translation">ตั้งค่า</a>)' ?></p>
 
   <?php foreach ($errors as $err): ?>
     <div class="flash error"><?= e($err) ?></div>
@@ -239,7 +350,7 @@ $currentClassificationId = $species['classification_id'] ?? '';
     <div class="flash error">ยังไม่มีชนิดในระบบ กรุณา<a href="subtype_form.php">เพิ่มชนิด</a>ก่อน</div>
   <?php else: ?>
 
-  <form method="post">
+  <form method="post" enctype="multipart/form-data">
     <?= csrfField() ?>
     <label for="category_code">ประเภทพืช</label>
     <select id="category_code" name="category_code" required onchange="filterSubtypesByCategory(this.value)">
@@ -290,6 +401,34 @@ $currentClassificationId = $species['classification_id'] ?? '';
     <label for="name_scientific">ชื่อวิทยาศาสตร์</label>
     <input type="text" id="name_scientific" name="name_scientific" value="<?= $v('name_scientific') ?>" placeholder="เช่น Cassia fistula">
 
+    <label>รูปภาพชนิดพันธุ์</label>
+    <?php if (!empty($species['image_path'])): ?>
+      <img src="../public/<?= e($species['image_path']) ?>" alt="" class="preview-thumb" id="image-preview">
+    <?php endif; ?>
+    <div class="field-row" data-photo-capture-for="image">
+      <button type="button" class="btn-outline btn-sm" data-photo-action="camera">📷 ถ่ายรูป</button>
+      <button type="button" class="btn-outline btn-sm" data-photo-action="gallery">🖼️ เลือกจากคลังภาพ</button>
+    </div>
+    <input type="file" id="image" name="image" accept="image/jpeg,image/png,image/gif,image/webp" data-preview-target="image-preview" hidden>
+    <div data-ai-identify-for="image" data-endpoint="identify_tree.php" data-apply-label="ใช้ข้อมูลนี้กรอกลงฟอร์ม" data-detail="full"<?= AI_ENABLED ? '' : ' data-ai-unavailable="1"' ?>>
+      <button type="button" class="btn-outline btn-sm" data-ai-action="identify" disabled>🔍 ให้ AI ช่วยระบุชนิดต้นไม้จากรูปนี้</button>
+      <?php if (!AI_ENABLED): ?>
+        <p class="field-hint">ปิดการใช้งาน AI อยู่ จึงยังใช้ไม่ได้ — ดูที่หน้า <a href="settings.php#ai-translation">ตั้งค่า</a></p>
+      <?php else: ?>
+        <p class="field-hint">ไม่รู้ว่าเป็นต้นอะไร? ถ่ายรูปหรือเลือกรูป แล้วให้ AI เดาชื่อพร้อมร่างข้อมูลทั้งหมดให้ (วิธีดูแล ลักษณะ คุณสมบัติ ประโยชน์ ข้อควรระวัง ประเภท/ชนิด) ใช้เวลาไม่เกิน 5 วินาที และตรวจสอบก่อนบันทึกเสมอ</p>
+      <?php endif; ?>
+      <div data-ai-output aria-live="polite"></div>
+    </div>
+    <p class="field-hint">
+      JPG / PNG / GIF / WEBP ขนาดไม่เกิน 10 MB — แสดงในรายการชนิดพันธุ์ และเป็นรูปสำรองบนหน้าต้นไม้ของผู้เข้าชม
+      สำหรับต้นที่ยังไม่มีรูปของตัวเอง
+    </p>
+    <?php if ($id && !empty($species['image_path'])): ?>
+      <label>
+        <input type="checkbox" name="remove_image"> ลบรูปภาพชนิดพันธุ์นี้ (ถ้าเลือกรูปใหม่ด้านบน จะถูกแทนที่ด้วยรูปใหม่)
+      </label>
+    <?php endif; ?>
+
     <label for="description">คำอธิบาย (ไทย)</label>
     <textarea id="description" name="description" rows="4"><?= $v('description') ?></textarea>
 
@@ -329,7 +468,48 @@ $currentClassificationId = $species['classification_id'] ?? '';
         เลือกโซนแล้วใส่จำนวน ระบบจะสร้างต้นไม้ตามจำนวนนั้นให้อัตโนมัติ (แต่ละต้นมี Tree ID/QR ของตัวเอง) —
         ไม่ต้องเพิ่มทีละต้น แก้ไขเป็นรายต้นได้ภายหลังที่หน้าต้นไม้
       </p>
+
+      <label for="plant_status">สถานะต้นไม้ที่เพิ่ม</label>
+      <select id="plant_status" name="plant_status">
+        <?php foreach ($treeStatuses as $key => $label): ?>
+          <option value="<?= e($key) ?>" <?= ($species['plant_status'] ?? 'healthy') === $key ? 'selected' : '' ?>><?= e($label) ?></option>
+        <?php endforeach; ?>
+      </select>
+
+      <label for="tree_image">รูปภาพต้นไม้ที่เพิ่ม (ไม่บังคับ)</label>
+      <input type="file" id="tree_image" name="tree_image" accept="image/jpeg,image/png,image/gif,image/webp" data-preview-target="tree-image-preview">
+      <p class="field-hint">
+        ใช้รูปเดียวกันกับทุกต้นที่เพิ่มครั้งนี้ — ถ้าไม่เลือก ต้นไม้จะแสดงรูปภาพชนิดพันธุ์ด้านบนแทน
+        ปักหมุดแผนที่และกรอกพิกัด GPS เป็นรายต้นได้ภายหลังที่หน้าแก้ไขต้นไม้
+      </p>
     </div>
+
+    <?php if (!$id): ?>
+    <div class="history-section">
+      <h2>สต็อกเริ่มต้น (ไม่บังคับ)</h2>
+      <p class="field-hint">ใส่ข้อมูลตรงนี้ถ้าต้องการบันทึกสต็อกและราคาตั้งแต่ตอนสร้าง — เพิ่มรายการอื่นและบันทึกการขายได้ภายหลังที่หน้าแก้ไขชนิดพันธุ์</p>
+      <div class="field-row">
+        <label>ขนาด
+          <select name="stock_size_id">
+            <option value="">— ไม่ระบุ —</option>
+            <?php foreach ($stockSizes as $sizeOption): ?>
+              <option value="<?= (int) $sizeOption['id'] ?>" <?= (int) ($species['stock_size_id'] ?? 0) === (int) $sizeOption['id'] ? 'selected' : '' ?>><?= e($sizeOption['name_th']) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </label>
+        <label>จำนวน<input type="number" name="stock_quantity" min="0" value="<?= $v('stock_quantity', '0') ?>"></label>
+        <label>ราคา (บาท)<input type="text" name="stock_price" inputmode="decimal" placeholder="เช่น 350" value="<?= $v('stock_price') ?>"></label>
+        <label>สถานะ
+          <select name="stock_status">
+            <?php foreach ($saleStatusLabels as $key => $label): ?>
+              <option value="<?= e($key) ?>" <?= ($species['stock_status'] ?? 'not_for_sale') === $key ? 'selected' : '' ?>><?= e($label) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </label>
+        <label>ช่องทางขาย<input type="text" name="stock_channel" placeholder="เช่น เรือนเพาะชำ, ออนไลน์" value="<?= $v('stock_channel') ?>"></label>
+      </div>
+    </div>
+    <?php endif; ?>
 
     <p><button class="btn" type="submit">บันทึก</button></p>
   </form>
@@ -429,8 +609,21 @@ $currentClassificationId = $species['classification_id'] ?? '';
       }
     }
 
+    // Replaces the chosen subtypes (used by the AI-identify "fill the form" button).
+    // Ids tied to a different category than categoryCode are skipped (same rule
+    // filterByCategory applies, and what the server checks on save).
+    function setIds(ids, categoryCode) {
+      selected = ids.filter(function (id) {
+        var meta = metaById[String(id)];
+        return meta && (!categoryCode || !meta.category || meta.category === categoryCode);
+      }).map(function (id) {
+        return { id: String(id), name: metaById[String(id)].name };
+      });
+      render();
+    }
+
     render();
-    return { filterByCategory: filterByCategory };
+    return { filterByCategory: filterByCategory, hasSelection: function () { return selected.length > 0; }, setIds: setIds };
   })();
 
   function filterSubtypesByCategory(categoryCode) {
@@ -550,5 +743,43 @@ $currentClassificationId = $species['classification_id'] ?? '';
   <?php endif; ?>
 </div>
 <?php require __DIR__ . '/_confirm_modal.php'; ?>
+<script src="../public/assets/js/image-preview.js"></script>
+<script src="../public/assets/js/photo-capture-buttons.js"></script>
+<script src="../public/assets/js/ai-identify-button.js"></script>
+<script>
+// "ใช้ข้อมูลนี้กรอกลงฟอร์ม" from the AI-identify panel. The names are what the
+// admin just asked to replace, so they're overwritten; the long text fields
+// and the category/subtypes are only filled in when still empty, so text the
+// admin already wrote (or chose) — e.g. when re-running this on an existing
+// species — is never clobbered.
+var aiIdentify = document.querySelector('[data-ai-identify-for="image"]'); // absent when the form is hidden (no subtypes yet)
+if (aiIdentify) aiIdentify.addEventListener('ai-identify:apply', function (e) {
+  var r = e.detail.result;
+  function setValue(id, value, onlyIfEmpty) {
+    var field = document.getElementById(id);
+    if (!field || !value) return;
+    if (onlyIfEmpty && field.value.trim() !== '') return;
+    field.value = value;
+  }
+  setValue('name', r.name_th || r.name_common, false);
+  setValue('name_common', r.name_common, false);
+  setValue('name_scientific', r.name_scientific, false);
+  setValue('description', r.description_th, true);
+  ['care_instructions', 'characteristics', 'properties', 'benefits', 'cautions', 'part_uses'].forEach(function (field) {
+    setValue(field, r[field], true);
+  });
+
+  var category = document.getElementById('category_code');
+  if (r.category_code && category && category.value === '') {
+    category.value = r.category_code;
+    filterSubtypesByCategory(r.category_code);
+  }
+  if (r.subtype_ids && r.subtype_ids.length && !subtypePicker.hasSelection()) {
+    subtypePicker.setIds(r.subtype_ids, category ? category.value : '');
+  }
+  document.getElementById('name').scrollIntoView({ behavior: 'smooth', block: 'center' });
+});
+</script>
+<script src="../public/assets/js/photo-shrink.js"></script>
 </body>
 </html>

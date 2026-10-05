@@ -10,16 +10,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $ids = array_filter(array_map('intval', $_POST['ids'] ?? []));
     if ($ids) {
         $pdo = db();
-        $countStmt = $pdo->prepare('SELECT COUNT(*) FROM trees WHERE species_id = :id');
         $deleteStmt = $pdo->prepare('DELETE FROM species WHERE id = :id');
         foreach ($ids as $id) {
+            $species = getSpeciesById($pdo, $id);
+            if (!$species) {
+                continue;
+            }
             // Same guard as species_delete.php: refuse to delete a species
-            // that still has trees assigned — reassign them first.
-            $countStmt->execute(['id' => $id]);
-            if ((int) $countStmt->fetchColumn() === 0) {
+            // that still has trees or planting plans assigned — reassign them
+            // first. A foreign-key refusal that slips past the count is
+            // skipped too, rather than aborting the rest of the batch.
+            if (speciesUsageCount($pdo, $id) !== 0) {
+                $skipped++;
+                continue;
+            }
+            try {
                 $deleteStmt->execute(['id' => $id]);
+                deletePublicFile($species['image_path'] ?? null);
                 $deleted++;
-            } else {
+            } catch (PDOException $e) {
+                if ($e->getCode() !== '23000') {
+                    throw $e;
+                }
                 $skipped++;
             }
         }

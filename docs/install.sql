@@ -141,6 +141,7 @@ CREATE TABLE species (
     name_zh            VARCHAR(150) NULL,
     name_common        VARCHAR(150) NULL, -- ชื่อสามัญ
     name_scientific    VARCHAR(150) NULL, -- ชื่อวิทยาศาสตร์ (Latin binomial, not localized)
+    image_path         VARCHAR(255) NULL, -- photo of the species itself; public page falls back to it when a tree has no photo of its own
     description        TEXT NULL,
     description_en     TEXT NULL,
     description_zh     TEXT NULL,

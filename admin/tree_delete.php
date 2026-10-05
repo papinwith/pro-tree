@@ -14,8 +14,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $pdo->prepare('DELETE FROM trees WHERE id = :id')->execute(['id' => $id]);
 
         if ($tree) {
-            deletePublicFile($tree['image_path']);
-            deletePublicFile($tree['map_image_path']);
+            // Photo/map files can be shared with sibling trees created in the
+            // same batch — only unlink them once nothing else uses them.
+            deletePublicFileIfUnreferenced($pdo, $tree['image_path']);
+            deletePublicFileIfUnreferenced($pdo, $tree['map_image_path']);
             deletePublicFile($tree['qr_code_path']);
         }
     }

@@ -130,7 +130,7 @@ function updateScanGps(PDO $pdo, int $scanId, int $visitorId, float $lat, float 
     $stmt = $pdo->prepare(
         "UPDATE tree_scans
          SET scan_lat = :lat, scan_lng = :lng, gps_accuracy_m = :acc, gps_available = 1
-         WHERE id = :id AND visitor_id = :vid AND scanned_at >= (NOW() - INTERVAL 10 MINUTE)"
+         WHERE id = :id AND visitor_id = :vid AND scanned_at >= (NOW() - INTERVAL '10 minutes')"
     );
     $stmt->execute([
         'lat' => $lat,
@@ -347,7 +347,7 @@ function recordSale(
         // rest of the on-hand count untouched.
         $remainingToDecrement = $quantity;
         $updateStmt = $pdo->prepare(
-            "UPDATE nursery_stock SET quantity = :qty, sale_status = IF(:qty2 <= 0, 'sold_out', sale_status) WHERE id = :id"
+            "UPDATE nursery_stock SET quantity = :qty, sale_status = CASE WHEN :qty2 <= 0 THEN 'sold_out' ELSE sale_status END WHERE id = :id"
         );
         foreach ($stockRows as $stockRow) {
             if ($remainingToDecrement <= 0) {
@@ -437,7 +437,7 @@ function speciesSaleStatus(PDO $pdo, int $speciesId): ?string
 {
     $stmt = $pdo->prepare(
         "SELECT sale_status FROM nursery_stock WHERE species_id = :sid AND sale_status != 'not_for_sale'
-         ORDER BY FIELD(sale_status, 'available','reserved','sold_out') LIMIT 1"
+         ORDER BY ARRAY_POSITION(ARRAY['available','reserved','sold_out'], sale_status) LIMIT 1"
     );
     $stmt->execute(['sid' => $speciesId]);
     $status = $stmt->fetchColumn();
@@ -465,7 +465,7 @@ function getCategoryByCode(PDO $pdo, string $code): ?array
  */
 function nextCategoryCode(PDO $pdo): string
 {
-    $max = (int) $pdo->query('SELECT MAX(CAST(code AS UNSIGNED)) FROM categories')->fetchColumn();
+    $max = (int) $pdo->query('SELECT MAX(CAST(code AS INTEGER)) FROM categories')->fetchColumn();
     return str_pad((string) ($max + 1), 3, '0', STR_PAD_LEFT);
 }
 
@@ -545,7 +545,7 @@ function getAllSpecies(PDO $pdo): array
  */
 function nextSpeciesCode(PDO $pdo, string $categoryCode): string
 {
-    $stmt = $pdo->prepare('SELECT MAX(CAST(species_code AS UNSIGNED)) FROM species WHERE category_code = :cc');
+    $stmt = $pdo->prepare('SELECT MAX(CAST(species_code AS INTEGER)) FROM species WHERE category_code = :cc');
     $stmt->execute(['cc' => $categoryCode]);
     $max = (int) $stmt->fetchColumn();
     return str_pad((string) ($max + 1), 3, '0', STR_PAD_LEFT);
@@ -630,6 +630,7 @@ function getTreeById(PDO $pdo, int $id): ?array
                 s.benefits, s.benefits_en, s.benefits_zh,
                 s.cautions, s.cautions_en, s.cautions_zh,
                 s.part_uses, s.part_uses_en, s.part_uses_zh,
+                s.image_path AS species_image_path,
                 z.zone_code, z.name AS zone_name, z.name_en AS zone_name_en, z.name_zh AS zone_name_zh
          FROM trees t
          JOIN species s ON s.id = t.species_id
@@ -649,7 +650,7 @@ function getTreeById(PDO $pdo, int $id): ?array
 function getTreesByZone(PDO $pdo, int $zoneId): array
 {
     $stmt = $pdo->prepare(
-        'SELECT t.id, t.image_path, t.status,
+        'SELECT t.id, COALESCE(NULLIF(t.image_path, \'\'), s.image_path) AS image_path, t.status,
                 s.name, s.name_en, s.name_zh, s.name_common
          FROM trees t
          JOIN species s ON s.id = t.species_id
@@ -734,21 +735,43 @@ function assetCode(PDO $pdo, int $treeId): string
     return $prefix . '-' . str_pad((string) $treeId, 6, '0', STR_PAD_LEFT);
 }
 
+/**
+ * Reads one setting. The whole (small) settings table is loaded on first use
+ * and kept for the rest of the request — a page asks for several keys, and
+ * each separate query costs a full round trip to the database. setSetting()
+ * keeps this copy in step, so a value written earlier in the same request is
+ * read back correctly.
+ */
 function getSetting(PDO $pdo, string $key, ?string $default = null): ?string
 {
-    $stmt = $pdo->prepare('SELECT setting_value FROM settings WHERE setting_key = :k');
-    $stmt->execute(['k' => $key]);
-    $value = $stmt->fetchColumn();
-    return $value !== false ? $value : $default;
+    $settings = &settingsCache();
+    if ($settings === null) {
+        $settings = [];
+        foreach ($pdo->query('SELECT setting_key, setting_value FROM settings')->fetchAll() as $row) {
+            $settings[$row['setting_key']] = $row['setting_value'];
+        }
+    }
+    return array_key_exists($key, $settings) && $settings[$key] !== null ? $settings[$key] : $default;
+}
+
+/** Per-request copy of the settings table (null = not loaded yet). */
+function &settingsCache(): ?array
+{
+    static $cache = null;
+    return $cache;
 }
 
 function setSetting(PDO $pdo, string $key, string $value): void
 {
     $stmt = $pdo->prepare(
         'INSERT INTO settings (setting_key, setting_value) VALUES (:k, :v)
-         ON DUPLICATE KEY UPDATE setting_value = :v2'
+         ON CONFLICT (setting_key) DO UPDATE SET setting_value = :v2'
     );
     $stmt->execute(['k' => $key, 'v' => $value, 'v2' => $value]);
+    $settings = &settingsCache();
+    if ($settings !== null) {
+        $settings[$key] = $value;
+    }
 }
 
 function isValidEmail(string $email): bool
@@ -787,23 +810,30 @@ function resolveAssetUrl(string $value, string $base): string
 }
 
 /**
- * Validates and moves an uploaded image into public/assets/uploads/{subdir}/,
- * using a random filename (never the client-supplied one). Returns the path
- * relative to public/ (e.g. "assets/uploads/tree/64f...b2.jpg"), or null if
- * no file was submitted for this field. Throws on an invalid/oversized file.
+ * Checks a $_FILES entry that should be an image: upload succeeded, within
+ * the 10 MB limit, and really a JPG/PNG/GIF/WEBP by its actual content (not
+ * its name or client-declared type). Returns ['ext' => 'jpg', 'mime' =>
+ * 'image/jpeg'], or null if no file was submitted for this field. Throws
+ * RuntimeException with a Thai message otherwise. Shared by every upload
+ * path so the rules can't drift apart.
  */
-function saveUploadedImage(array $file, string $subdir): ?string
+function inspectUploadedImage(array $file): ?array
 {
     if (!isset($file['error']) || $file['error'] === UPLOAD_ERR_NO_FILE) {
         return null;
+    }
+    if ($file['error'] === UPLOAD_ERR_INI_SIZE || $file['error'] === UPLOAD_ERR_FORM_SIZE) {
+        // PHP's own upload_max_filesize (2 MB by default) tripped before our
+        // 10 MB check below could — same problem from the admin's side.
+        throw new RuntimeException('ไฟล์รูปภาพมีขนาดใหญ่เกินไป (สูงสุด 10 MB)');
     }
     if ($file['error'] !== UPLOAD_ERR_OK) {
         throw new RuntimeException('อัปโหลดล้มเหลว (รหัสข้อผิดพลาด ' . $file['error'] . ')');
     }
 
-    $maxBytes = 5 * 1024 * 1024;
+    $maxBytes = 10 * 1024 * 1024;
     if ($file['size'] > $maxBytes) {
-        throw new RuntimeException('ไฟล์รูปภาพมีขนาดใหญ่เกินไป (สูงสุด 5 MB)');
+        throw new RuntimeException('ไฟล์รูปภาพมีขนาดใหญ่เกินไป (สูงสุด 10 MB)');
     }
 
     $imageInfo = @getimagesize($file['tmp_name']);
@@ -812,15 +842,30 @@ function saveUploadedImage(array $file, string $subdir): ?string
     }
 
     $allowedTypes = [
-        IMAGETYPE_JPEG => 'jpg',
-        IMAGETYPE_PNG => 'png',
-        IMAGETYPE_GIF => 'gif',
-        IMAGETYPE_WEBP => 'webp',
+        IMAGETYPE_JPEG => ['ext' => 'jpg', 'mime' => 'image/jpeg'],
+        IMAGETYPE_PNG => ['ext' => 'png', 'mime' => 'image/png'],
+        IMAGETYPE_GIF => ['ext' => 'gif', 'mime' => 'image/gif'],
+        IMAGETYPE_WEBP => ['ext' => 'webp', 'mime' => 'image/webp'],
     ];
-    $ext = $allowedTypes[$imageInfo[2]] ?? null;
-    if ($ext === null) {
+    if (!isset($allowedTypes[$imageInfo[2]])) {
         throw new RuntimeException('ไม่รองรับชนิดไฟล์นี้ กรุณาใช้ JPG, PNG, GIF หรือ WEBP');
     }
+    return $allowedTypes[$imageInfo[2]];
+}
+
+/**
+ * Validates and moves an uploaded image into public/assets/uploads/{subdir}/,
+ * using a random filename (never the client-supplied one). Returns the path
+ * relative to public/ (e.g. "assets/uploads/tree/64f...b2.jpg"), or null if
+ * no file was submitted for this field. Throws on an invalid/oversized file.
+ */
+function saveUploadedImage(array $file, string $subdir): ?string
+{
+    $type = inspectUploadedImage($file);
+    if ($type === null) {
+        return null;
+    }
+    $ext = $type['ext'];
 
     $destDir = publicDir() . '/assets/uploads/' . $subdir;
     if (!is_dir($destDir) && !mkdir($destDir, 0755, true) && !is_dir($destDir)) {
@@ -853,6 +898,130 @@ function deletePublicFile(?string $relativePath): void
     if ($full !== false && str_starts_with($full, $base . DIRECTORY_SEPARATOR) && is_file($full)) {
         unlink($full);
     }
+}
+
+/**
+ * Like deletePublicFile(), but leaves the file alone while anything in the DB
+ * still points at it. Bulk-creating trees (admin/tree_form.php,
+ * admin/species_form.php) stores ONE uploaded photo/map file on every tree it
+ * makes, so removing or re-photographing a single sibling must not unlink a
+ * file the others still show. Call it AFTER the row that referenced the file
+ * has been deleted/updated, so that row no longer counts.
+ */
+function deletePublicFileIfUnreferenced(PDO $pdo, ?string $relativePath): void
+{
+    if (!$relativePath) {
+        return;
+    }
+    // PDO (native prepares) can't reuse one named placeholder, hence p1..p4.
+    $stmt = $pdo->prepare(
+        'SELECT (SELECT COUNT(*) FROM trees WHERE image_path = :p1 OR map_image_path = :p2)
+              + (SELECT COUNT(*) FROM species WHERE image_path = :p3)
+              + (SELECT COUNT(*) FROM settings WHERE setting_value = :p4)'
+    );
+    $stmt->execute(['p1' => $relativePath, 'p2' => $relativePath, 'p3' => $relativePath, 'p4' => $relativePath]);
+    if ((int) $stmt->fetchColumn() === 0) {
+        deletePublicFile($relativePath);
+    }
+}
+
+/**
+ * How many rows still depend on a species and block a plain delete: its
+ * trees, planting plans (planting_plans.species_id is a non-cascading foreign
+ * key) and recorded sales. Sales are counted even though sale_transactions
+ * would technically cascade away with the species — they are the historical
+ * revenue record (see docs/install.sql), so a delete must never silently
+ * wipe them; use reassignSpeciesAndDelete() to carry them over instead.
+ * Current nursery stock isn't counted: it's only today's listing and goes
+ * away with the species.
+ */
+function speciesUsageCount(PDO $pdo, int $speciesId): int
+{
+    $stmt = $pdo->prepare(
+        'SELECT (SELECT COUNT(*) FROM trees WHERE species_id = :s1)
+              + (SELECT COUNT(*) FROM planting_plans WHERE species_id = :s2)
+              + (SELECT COUNT(*) FROM sale_transactions WHERE species_id = :s3)'
+    );
+    $stmt->execute(['s1' => $speciesId, 's2' => $speciesId, 's3' => $speciesId]);
+    return (int) $stmt->fetchColumn();
+}
+
+/**
+ * Same idea for a zone: its trees plus planting plans (a non-cascading
+ * foreign key that used to crash zone_delete.php with an uncaught exception).
+ */
+function zoneUsageCount(PDO $pdo, int $zoneId): int
+{
+    $stmt = $pdo->prepare(
+        'SELECT (SELECT COUNT(*) FROM trees WHERE zone_id = :z1)
+              + (SELECT COUNT(*) FROM planting_plans WHERE zone_id = :z2)'
+    );
+    $stmt->execute(['z1' => $zoneId, 'z2' => $zoneId]);
+    return (int) $stmt->fetchColumn();
+}
+
+/**
+ * "Merge then delete": moves everything that belongs to species $fromId over
+ * to species $toId, then deletes $fromId — the species equivalent of the
+ * reassign option on category_delete.php / subtype_delete.php. Moved: trees
+ * (their plant_code is recomputed, since it embeds the species code — the QR
+ * link is by tree id and keeps working, but printed code labels may need
+ * reprinting), planting plans, nursery stock, sales history and any product
+ * listings. All-or-nothing in one transaction.
+ *
+ * Returns ['moved' => trees moved, 'recoded' => trees whose plant_code
+ * changed], or null when the request is invalid (missing species, same
+ * species). Lets PDOException through (e.g. a plant_code collision) after
+ * rolling back, so the caller decides how to report it.
+ */
+function reassignSpeciesAndDelete(PDO $pdo, int $fromId, int $toId): ?array
+{
+    if ($fromId === $toId) {
+        return null;
+    }
+    $from = getSpeciesById($pdo, $fromId);
+    if (!$from || !getSpeciesById($pdo, $toId)) {
+        return null;
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $idsStmt = $pdo->prepare('SELECT id FROM trees WHERE species_id = :s');
+        $idsStmt->execute(['s' => $fromId]);
+        $treeIds = array_map('intval', $idsStmt->fetchAll(PDO::FETCH_COLUMN));
+
+        // One tree at a time: recomputeTreePlantCode() numbers a tree by
+        // counting the OTHER trees already sharing its species/zone/area, so
+        // moving them all first would give every one the same sequence and
+        // collide on the unique plant_code (the same reason admin/tree_form.php
+        // recomputes right after each insert, not in a batch afterwards).
+        $moveTree = $pdo->prepare('UPDATE trees SET species_id = :to WHERE id = :id');
+        $recoded = 0;
+        foreach ($treeIds as $treeId) {
+            $moveTree->execute(['to' => $toId, 'id' => $treeId]);
+            if (recomputeTreePlantCode($pdo, $treeId)) {
+                $recoded++;
+            }
+        }
+
+        foreach (['planting_plans', 'nursery_stock', 'sale_transactions', 'products'] as $table) {
+            $pdo->prepare("UPDATE $table SET species_id = :to WHERE species_id = :from")
+                ->execute(['to' => $toId, 'from' => $fromId]);
+        }
+
+        $pdo->prepare('DELETE FROM species WHERE id = :id')->execute(['id' => $fromId]);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+
+    // Only after the commit: the species photo is no longer referenced.
+    deletePublicFileIfUnreferenced($pdo, $from['image_path'] ?? null);
+
+    return ['moved' => count($treeIds), 'recoded' => $recoded];
 }
 
 /**
@@ -902,32 +1071,51 @@ function generateTreeQrCode(int $treeId): string
 }
 
 /**
- * Generates a full logical SQL backup of every table (structure + data) —
- * "มีฐานข้อมูลสำรอง" (proposal §9). Written against PDO directly (not
- * shelling out to mysqldump) so it works regardless of whether the mysql
- * client tools are on the web server's PATH. Streamed to the admin as a
- * downloadable .sql file by admin/backup.php.
+ * Generates a logical SQL backup of every table's DATA — "มีฐานข้อมูลสำรอง"
+ * (proposal §9). Written against PDO directly (not shelling out to
+ * pg_dump/mysqldump) so it works regardless of whether Postgres client tools
+ * are on the web server's PATH. Streamed to the admin as a downloadable
+ * .sql file by admin/backup.php.
+ *
+ * Data only, not structure — unlike the old MySQL version, Postgres has no
+ * SQL-level equivalent of `SHOW CREATE TABLE` to reconstruct full DDL
+ * (indexes, triggers, constraints) through PDO alone; reproducing that would
+ * mean re-implementing a chunk of pg_dump by hand. Restoring this backup
+ * means running docs/install.postgres.sql first for structure, then this
+ * file for data (see the header comment this function writes). The file
+ * empties every table first (so install.postgres.sql's demo rows don't collide
+ * with the restored ones) and moves each auto-numbering sequence past the
+ * restored ids at the end (so the next insert doesn't reuse one).
  */
 function generateDatabaseBackupSql(PDO $pdo): string
 {
-    $tables = $pdo->query('SHOW TABLES')->fetchAll(PDO::FETCH_COLUMN);
+    $tables = $pdo->query(
+        "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename"
+    )->fetchAll(PDO::FETCH_COLUMN);
 
-    $out = "-- tree_qr_system backup — generated " . date('Y-m-d H:i:s') . "\n";
-    $out .= "-- Restore with: mysql -u root -p tree_qr_system < this_file.sql\n\n";
-    $out .= "SET NAMES utf8mb4;\nSET FOREIGN_KEY_CHECKS=0;\n\n";
+    $out = "-- tree_qr_system data backup — generated " . date('Y-m-d H:i:s') . "\n";
+    $out .= "-- Data only (see generateDatabaseBackupSql() for why). Restore: run\n";
+    $out .= "-- docs/install.postgres.sql for structure first, then load this file, e.g.:\n";
+    $out .= "--   psql \"\$DATABASE_URL\" -f this_file.sql\n";
+    $out .= "-- This file first EMPTIES every table below (install.postgres.sql seeds\n";
+    $out .= "-- demo rows that would otherwise collide with these), so only load it\n";
+    $out .= "-- into a database whose current data you are happy to replace.\n\n";
+    if ($tables) {
+        $out .= 'TRUNCATE ' . implode(', ', array_map(fn($t) => '"' . $t . '"', $tables)) . " RESTART IDENTITY CASCADE;\n\n";
+    }
+    $out .= "SET session_replication_role = 'replica'; -- suspend FK checks while loading\n\n";
 
     foreach ($tables as $table) {
-        $createRow = $pdo->query('SHOW CREATE TABLE `' . $table . '`')->fetch();
-        $out .= "DROP TABLE IF EXISTS `$table`;\n" . $createRow['Create Table'] . ";\n\n";
-
-        $rows = $pdo->query('SELECT * FROM `' . $table . '`')->fetchAll(PDO::FETCH_ASSOC);
+        $rows = $pdo->query('SELECT * FROM "' . $table . '"')->fetchAll(PDO::FETCH_ASSOC);
         foreach ($rows as $row) {
             $columns = array_keys($row);
             $values = array_map(
-                fn($v) => $v === null ? 'NULL' : $pdo->quote((string) $v),
+                // pgsql hands booleans back as PHP bool; (string) false is '', which is not valid boolean input.
+                fn($v) => $v === null ? 'NULL' : (is_bool($v) ? ($v ? 'TRUE' : 'FALSE') : $pdo->quote((string) $v)),
                 array_values($row)
             );
-            $out .= "INSERT INTO `$table` (`" . implode('`, `', $columns) . '`) VALUES ('
+            $quotedColumns = array_map(fn($c) => '"' . $c . '"', $columns);
+            $out .= 'INSERT INTO "' . $table . '" (' . implode(', ', $quotedColumns) . ') VALUES ('
                 . implode(', ', $values) . ");\n";
         }
         if ($rows) {
@@ -935,6 +1123,47 @@ function generateDatabaseBackupSql(PDO $pdo): string
         }
     }
 
-    $out .= "SET FOREIGN_KEY_CHECKS=1;\n";
+    $out .= "SET session_replication_role = 'origin';\n\n";
+
+    // The rows above carry explicit ids, so the sequences behind serial/identity
+    // columns still sit at their start: move each past the highest restored id.
+    $sequenced = $pdo->query(
+        "SELECT table_name, column_name FROM information_schema.columns
+         WHERE table_schema = 'public' AND (column_default LIKE 'nextval(%' OR is_identity = 'YES')
+         ORDER BY table_name, ordinal_position"
+    )->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($sequenced as $col) {
+        $t = '"' . $col['table_name'] . '"';
+        $c = '"' . $col['column_name'] . '"';
+        $out .= "SELECT setval(pg_get_serial_sequence('$t', '{$col['column_name']}'), COALESCE(MAX($c), 1), MAX($c) IS NOT NULL) FROM $t;\n";
+    }
     return $out;
+}
+
+/**
+ * The map box for public/assets/js/gps-map-picker.js (real OpenStreetMap map
+ * for picking latitude/longitude into the two given fields). With no position
+ * typed yet it opens on the average of the trees that already have GPS (the
+ * garden itself), or on Thailand when none do. The page must also load Leaflet
+ * (gpsMapAssets()) and gps-map-picker.js.
+ */
+function gpsMapPicker(PDO $pdo, string $latFieldId = 'latitude', string $lngFieldId = 'longitude'): string
+{
+    static $center = null;
+    if ($center === null) {
+        $row = $pdo->query('SELECT AVG(latitude) AS lat, AVG(longitude) AS lng FROM trees WHERE latitude IS NOT NULL AND longitude IS NOT NULL')->fetch();
+        $center = ($row && $row['lat'] !== null)
+            ? [(float) $row['lat'], (float) $row['lng'], 17]
+            : [13.0, 101.0, 6];
+    }
+    return '<div class="gps-map" style="height:320px" data-gps-map data-lat-target="' . e($latFieldId) . '" data-lng-target="' . e($lngFieldId) . '"'
+        . ' data-default-lat="' . e((string) $center[0]) . '" data-default-lng="' . e((string) $center[1]) . '"'
+        . ' data-default-zoom="' . (int) $center[2] . '"></div>';
+}
+
+/** Leaflet (the map library behind gpsMapPicker()) — put inside <head>. */
+function gpsMapAssets(): string
+{
+    return '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css">' . "\n"
+        . '<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>';
 }

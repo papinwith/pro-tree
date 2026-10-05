@@ -107,6 +107,6 @@ document:
 | Previous/Next relationship rewiring | [`tree-identity-and-relationships.md`](tree-identity-and-relationships.md) §4 |
 | QR code resolution | [`tree-identity-and-relationships.md`](tree-identity-and-relationships.md) §6 |
 | Scan location / GPS capture | [`tree-identity-and-relationships.md`](tree-identity-and-relationships.md) §7 |
-| Multilingual content + AI (Gemini) translation review | [`multilingual-and-ai-translation.md`](multilingual-and-ai-translation.md) §3 |
+| Multilingual content + AI (Ollama) translation review | [`multilingual-and-ai-translation.md`](multilingual-and-ai-translation.md) §3 |
 | Interactive map (public browsing + admin editing) | [`map-system.md`](map-system.md) §2–3 |
 | Role/permission enforcement on every flow above | [`rbac.md`](rbac.md) §7–8 |

@@ -40,6 +40,9 @@ $stockForSale = array_values(array_filter(
 
 // --- Map banner (per-tree override falls back to global default) ---
 $mapImage = $tree['map_image_path'] ?: getSetting($pdo, 'default_map_image', '');
+// The tree's own photo wins; otherwise fall back to the species photo so a
+// bulk-created tree without its own picture still shows one.
+$treeImagePath = $tree['image_path'] ?: ($tree['species_image_path'] ?? null);
 $siteLogo = getSetting($pdo, 'site_logo', '');
 
 // --- Zone pins overlaid on the map banner — too many trees to pin
@@ -68,18 +71,18 @@ $contactLine = getSetting($pdo, 'contact_line', '');
 $contactAddress = getSetting($pdo, 'contact_address', '');
 $openingHours = getSetting($pdo, 'opening_hours', '');
 if ($locale !== 'th') {
-    // Up to 5 sequential Gemini calls can land below (contact address,
-    // opening hours, species, zone, category), each allowed up to 45s on a
+    // Up to 5 sequential AI calls can land below (contact address,
+    // opening hours, species, zone, category), each allowed up to 180s on a
     // cache miss — comfortably past PHP's default 30s max_execution_time.
     // Only raised on this non-Thai, cache-miss-possible path; the Thai path
-    // above never calls out to Gemini at all.
-    set_time_limit(240);
+    // above never calls out to the model at all.
+    set_time_limit(600);
     $contactAddress = ensureSettingTranslated($pdo, 'contact_address', $contactAddress, $locale);
     $openingHours = ensureSettingTranslated($pdo, 'opening_hours', $openingHours, $locale);
 }
 
 // Admin only ever enters Thai — EN/ZH are generated on first view in that
-// language and cached on the species/zone rows, so this only calls Gemini
+// language and cached on the species/zone rows, so this only calls the model
 // once per species/zone per language, not on every request.
 if ($locale !== 'th') {
     $tree = ensureSpeciesTranslated($pdo, $tree, $locale);
@@ -159,8 +162,8 @@ $detailSections = [
       <div class="flash <?= $flash['type'] === 'error' ? 'error' : '' ?>"><?= e($flash['text']) ?></div>
     <?php endif; ?>
 
-    <?php if ($tree['image_path']): ?>
-      <img class="tree-image" id="treeImage" src="<?= e($base . '/' . ltrim($tree['image_path'], '/')) ?>" alt="<?= e($treeName) ?>" tabindex="0" role="button" aria-label="<?= e(t('expand_image_label')) ?>">
+    <?php if ($treeImagePath): ?>
+      <img class="tree-image" id="treeImage" src="<?= e($base . '/' . ltrim($treeImagePath, '/')) ?>" alt="<?= e($treeName) ?>" tabindex="0" role="button" aria-label="<?= e(t('expand_image_label')) ?>">
     <?php endif; ?>
 
     <h1 class="tree-name"><?= e($treeName) ?></h1>
@@ -263,7 +266,7 @@ $detailSections = [
   </div>
 </div>
 
-<?php if ($tree['image_path'] || $mapImage): ?>
+<?php if ($treeImagePath || $mapImage): ?>
 <div class="lightbox-overlay" id="imageLightbox" hidden>
   <button type="button" class="lightbox-close" id="imageLightboxClose" aria-label="Close">×</button>
   <img class="lightbox-img" id="imageLightboxImg" src="" alt="<?= e($treeName) ?>">

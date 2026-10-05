@@ -65,10 +65,10 @@ stable `permission_key` used in code and in the `role_permissions` table
 | | `tree.relationship.manage` | Set/rewire a tree's Previous/Next neighbor links (`tree_relationships` — see [`tree-identity-and-relationships.md`](tree-identity-and-relationships.md) §4) |
 | | `tree.location.manage` | Move a tree to a new location/zone/origin (writes `plant_location_history`, triggers `plant_code` recompute — see [`tree-identity-and-relationships.md`](tree-identity-and-relationships.md) §5) |
 | **QR** | `qrcode.manage` | Generate/regenerate QR codes, view/download QR sheets |
-| **Translation** | `translation.request` | Trigger an AI (Gemini) translation for a species field |
+| **Translation** | `translation.request` | Trigger an AI (Ollama) translation for a species field |
 | | `translation.review` | Approve/edit/reject a pending AI translation draft |
 | **Admin accounts** | `admin.manage` | Create/edit/deactivate admin accounts; assign roles |
-| | `gemini.config.manage` | Configure the Gemini API key/model — deliberately separate from `settings.manage` per the spec's explicit "Tree Admin must not modify Gemini API credentials" |
+| | `gemini.config.manage` | Configure the Ollama URL/model — deliberately separate from `settings.manage` per the spec's explicit "Tree Admin must not modify Ollama API credentials" |
 | **Visitor data** | `scan.view` | View scan records/history (per-tree and aggregate) |
 | | `visitor.view` | View visitor records (visitor ID, IP, UA, first/last seen) |
 | | `interest.view` | View interested-visitor emails / lead list |
@@ -311,7 +311,7 @@ table in `page-flow.md`, which doesn't match the real file-based routes).
 | *(planned)* `admin/map_admin.php` (zone boundaries + marker drag) | `zone.manage` (boundary edits) / `tree.location.manage` (marker drag) — see [`map-system.md`](map-system.md) §3 |
 | *(planned)* `admin/translations.php` (AI translation review) | `translation.request` (trigger) / `translation.review` (approve/reject) |
 | *(planned)* `admin/users.php` (admin/role management) | `admin.manage` |
-| *(planned)* Gemini API key/model config section | `gemini.config.manage` |
+| *(planned)* Ollama URL/model config section | `gemini.config.manage` |
 | *(planned)* Executive dashboard page | `dashboard.view` |
 | *(planned)* `public/map.php` | none — public, no auth (see [`map-system.md`](map-system.md) §2) |
 

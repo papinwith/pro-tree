@@ -4,7 +4,8 @@ requirePermission('zone.manage');
 
 $pdo = db();
 $zones = $pdo->query(
-    'SELECT z.*, (SELECT COUNT(*) FROM trees t WHERE t.zone_id = z.id) AS tree_count
+    'SELECT z.*, (SELECT COUNT(*) FROM trees t WHERE t.zone_id = z.id) AS tree_count,
+            (SELECT COUNT(*) FROM planting_plans pp WHERE pp.zone_id = z.id) AS plan_count
      FROM zones z ORDER BY z.name ASC'
 )->fetchAll();
 $completeness = getDataCompletenessStats($pdo);
@@ -26,7 +27,7 @@ $completeness = getDataCompletenessStats($pdo);
 
   <div class="btn-row">
     <a class="btn" href="zone_form.php">+ เพิ่มโซน</a>
-    <form id="bulkDeleteZones" class="inline" method="post" action="zone_bulk_delete.php" data-confirm="ลบโซนที่เลือกทั้งหมดใช่หรือไม่? (รายการที่ยังมีต้นไม้ผูกอยู่จะถูกข้าม)">
+    <form id="bulkDeleteZones" class="inline" method="post" action="zone_bulk_delete.php" data-confirm="ลบโซนที่เลือกทั้งหมดใช่หรือไม่? (รายการที่ยังมีต้นไม้หรือแผนปลูกผูกอยู่จะถูกข้าม)">
       <?= csrfField() ?>
       <button class="btn btn-sm btn-danger" type="submit" data-bulk-submit="zones" disabled>ลบที่เลือก</button>
     </form>
@@ -50,7 +51,7 @@ $completeness = getDataCompletenessStats($pdo);
     <div class="flash<?= (int) ($_GET['bulk_skipped'] ?? 0) > 0 ? ' warning' : '' ?>">
       ลบโซนที่เลือกแล้ว <?= (int) $_GET['bulk_deleted'] ?> รายการ
       <?php if ((int) ($_GET['bulk_skipped'] ?? 0) > 0): ?>
-        (ข้าม <?= (int) $_GET['bulk_skipped'] ?> รายการที่ยังมีต้นไม้ผูกอยู่)
+        (ข้าม <?= (int) $_GET['bulk_skipped'] ?> รายการที่ยังมีต้นไม้หรือแผนปลูกผูกอยู่)
       <?php endif; ?>
     </div>
   <?php endif; ?>
@@ -82,7 +83,7 @@ $completeness = getDataCompletenessStats($pdo);
           <td>
             <div class="btn-row">
               <a class="btn-outline btn-sm" href="zone_form.php?id=<?= (int) $z['id'] ?>">แก้ไข</a>
-              <?php if ((int) $z['tree_count'] === 0): ?>
+              <?php if ((int) $z['tree_count'] === 0 && (int) $z['plan_count'] === 0): ?>
               <form class="inline" method="post" action="zone_delete.php" data-confirm="ลบโซนนี้ใช่หรือไม่?">
                 <?= csrfField() ?>
                 <input type="hidden" name="id" value="<?= (int) $z['id'] ?>">

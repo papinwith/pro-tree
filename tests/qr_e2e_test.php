@@ -50,7 +50,7 @@ function httpGet(string $url, ?string $cookie = null): array
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HEADER => true,
         CURLOPT_FOLLOWLOCATION => false,
-        CURLOPT_TIMEOUT => 5,
+        CURLOPT_TIMEOUT => 20, // bumped from 5s: Supabase (remote Postgres) round-trips add real latency vs local MySQL
     ]);
     if ($cookie !== null) {
         curl_setopt($ch, CURLOPT_COOKIE, $cookie);

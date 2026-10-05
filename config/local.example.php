@@ -1,30 +1,21 @@
 <?php
-// Copy this file to `local.php` (same folder) and fill in your real keys.
-// local.php is gitignored — it never gets committed, so your key stays
-// out of version control and off this machine only.
+// Copy this file to `local.php` (same folder) to override local settings.
+// local.php is gitignored — it never gets committed.
 //
 //   cp config/local.example.php config/local.php
 //
-// Then edit config/local.php and paste your key on the line below.
-
-if (!defined('GEMINI_API_KEY')) {
-    define('GEMINI_API_KEY', 'paste-your-gemini-api-key-here');
-}
-
-// Optional — only uncomment if you want a model other than the default
-// set in config/config.php.
-// if (!defined('GEMINI_MODEL')) {
-//     define('GEMINI_MODEL', 'gemini-2.0-flash');
+// AI features use a local Ollama server (no API key). The defaults in
+// config/config.php work out of the box once the models are pulled
+// (`ollama pull qwen3:8b` and `ollama pull qwen2.5vl:7b`) — uncomment only
+// to change them.
+// if (!defined('OLLAMA_URL')) {
+//     define('OLLAMA_URL', 'http://localhost:11434');
 // }
-
-// Optional — only uncomment if translations are silently failing/falling
-// back to Thai on this machine because outbound IPv6 to
-// generativelanguage.googleapis.com is misconfigured or blackholed on your
-// network (curl hangs the full timeout trying IPv6 first otherwise). Leave
-// this off if translations already work — forcing IPv4 unconditionally can
-// be worse on a host where IPv6 is the working/faster path.
-// if (!defined('GEMINI_FORCE_IPV4')) {
-//     define('GEMINI_FORCE_IPV4', true);
+// if (!defined('OLLAMA_MODEL')) {
+//     define('OLLAMA_MODEL', 'qwen3:8b'); // translation; '' turns all AI off
+// }
+// if (!defined('OLLAMA_VISION_MODEL')) {
+//     define('OLLAMA_VISION_MODEL', 'qwen2.5vl:7b'); // photo identification
 // }
 
 // Optional — dev-only login bypass, lets admin/login.php show "log in as

@@ -32,6 +32,8 @@ $port = 8095;
 $base = "http://$host:$port";
 
 $pdo = db();
+require_once __DIR__ . '/_test_admin.php';
+$testAdmin = createTestAdmin($pdo);
 
 $pass = 0;
 $fail = 0;
@@ -55,7 +57,7 @@ function httpRequest(string $url, ?string $cookieFile = null, ?array $post = nul
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HEADER => true,
         CURLOPT_FOLLOWLOCATION => false,
-        CURLOPT_TIMEOUT => 5,
+        CURLOPT_TIMEOUT => 20, // bumped from 5s: Supabase (remote Postgres) round-trips add real latency vs local MySQL
     ];
     if ($cookieFile !== null) {
         $opts[CURLOPT_COOKIEJAR] = $cookieFile;
@@ -142,10 +144,12 @@ register_shutdown_function(function () use (&$serverProc, $pdo, &$createdTreeIds
 
 try {
     $cookieFile = tempnam(sys_get_temp_dir(), 'formval_cookies_');
-    httpRequest("$base/admin/login.php", $cookieFile);
+    $rLoginPage = httpRequest("$base/admin/login.php", $cookieFile);
+    preg_match('/name="csrf_token" value="([^"]+)"/', $rLoginPage['body'], $csrfMatch);
     $rLogin = httpRequest("$base/admin/login.php", $cookieFile, [
-        'username' => 'admin',
-        'password' => 'ChangeMe123!',
+        'username' => $testAdmin['username'],
+        'password' => $testAdmin['password'],
+        'csrf_token' => $csrfMatch[1] ?? '',
     ]);
     check('admin login succeeds', $rLogin['status'] === 302, "got {$rLogin['status']}");
 
@@ -160,6 +164,7 @@ try {
         'species_id' => (string) $speciesId,
         'zone_id' => (string) $zoneId,
         'is_active' => '1',
+        'csrf_token' => $csrfMatch[1] ?? '',
     ]);
     check('a minimal create redirects to dashboard', $rCreate['status'] === 302, "got {$rCreate['status']}");
     $firstId = newTreeIdFromRedirect($rCreate);
@@ -180,6 +185,7 @@ try {
         'zone_id' => (string) $zoneId,
         'is_active' => '1',
         'quantity' => '3',
+        'csrf_token' => $csrfMatch[1] ?? '',
     ]);
     check('a bulk create redirects to dashboard', $rBulk['status'] === 302, "got {$rBulk['status']}");
 
@@ -211,6 +217,7 @@ try {
             'zone_id' => (string) $zoneId,
             'status' => 'needs_attention',
             'is_active' => '1',
+            'csrf_token' => $csrfMatch[1] ?? '',
         ]);
         check('editing without the removed fields still succeeds', $rEdit['status'] === 302, "got {$rEdit['status']}");
 
@@ -228,6 +235,7 @@ try {
         'species_id' => '999999',
         'zone_id' => (string) $zoneId,
         'is_active' => '1',
+        'csrf_token' => $csrfMatch[1] ?? '',
     ]);
     check('invalid species_id is rejected (200, not a redirect)', $rInvalid['status'] === 200, "got {$rInvalid['status']}");
     check('invalid species_id shows a friendly error', str_contains($rInvalid['body'], 'กรุณาเลือกชนิดพันธุ์ให้ถูกต้อง'));

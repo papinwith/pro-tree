@@ -125,22 +125,23 @@ $openingHours = $errors ? ($openingHours ?? '') : getSetting($pdo, 'opening_hour
   <p class="field-hint">ต้นไม้แต่ละต้นสามารถกำหนดค่าเฉพาะของตัวเองแทนค่านี้ได้ในแบบฟอร์มแก้ไขต้นไม้ — ข้อมูลติดต่อ/เวลาทำการด้านบนจะแสดงในหน้าต้นไม้ที่ลูกค้าเห็นตอนสแกน QR</p>
 
   <section id="ai-translation" class="history-section">
-    <h2>คำแปลด้วย AI (Gemini)</h2>
+    <h2>AI (Ollama) — คำแปล และระบุชนิดต้นไม้จากรูป</h2>
     <?php if (AI_ENABLED): ?>
-      <div class="flash">✓ ตั้งค่า Gemini API key แล้ว — ใช้โมเดล <code><?= e(GEMINI_MODEL) ?></code></div>
+      <div class="flash">✓ เปิดใช้งานแล้ว — แปลด้วย <code><?= e(OLLAMA_MODEL) ?></code>, ระบุรูปด้วย <code><?= e(OLLAMA_VISION_MODEL) ?></code> ที่ <code><?= e(OLLAMA_URL) ?></code></div>
     <?php else: ?>
-      <div class="flash error">✗ ยังไม่ได้ตั้งค่า Gemini API key</div>
+      <div class="flash error">✗ ปิดการใช้งาน AI อยู่ (OLLAMA_MODEL ว่าง)</div>
     <?php endif; ?>
     <p class="field-hint">
-      คีย์นี้ต้องตั้งค่าในไฟล์เท่านั้น (ไม่มีช่องกรอกในหน้าเว็บ และไม่เก็บลงฐานข้อมูล เพื่อไม่ให้หลุดปนไปกับข้อมูลสำรอง/export):
+      ใช้ Ollama ที่รันในเครื่อง ไม่ต้องใช้ API key — เปิดโปรแกรม Ollama ทิ้งไว้ แล้วติดตั้งโมเดลครั้งเดียว:
     </p>
     <ol class="field-hint">
-      <li>คัดลอกไฟล์ <code>config/local.example.php</code> เป็น <code>config/local.php</code></li>
-      <li>เปิด <code>config/local.php</code> แล้วแทนที่ <code>paste-your-gemini-api-key-here</code> ด้วยคีย์จริง</li>
-      <li>บันทึกไฟล์ — ไม่ต้องรีสตาร์ท Apache ก็ใช้ได้ทันที</li>
+      <li><code>ollama pull qwen3:8b</code> — แปลภาษา</li>
+      <li><code>ollama pull qwen2.5vl:7b</code> — ปุ่ม "ให้ AI ช่วยระบุชนิดต้นไม้จากรูป"</li>
     </ol>
-    <p class="field-hint muted-note"><code>config/local.php</code> อยู่ใน <code>.gitignore</code> แล้ว จะไม่ถูกคอมมิตเข้า git โดยไม่ตั้งใจ</p>
+    <p class="field-hint">ถ้าเชื่อมต่อ Ollama ไม่ได้ คำแปลจะแสดงเป็นภาษาไทยแทน และการระบุจากรูปจะแจ้งข้อผิดพลาด (บนโฮสต์อื่นให้ตั้ง environment variable <code>OLLAMA_URL</code>, <code>OLLAMA_MODEL</code>, <code>OLLAMA_VISION_MODEL</code>)</p>
+    <p class="field-hint muted-note">เปลี่ยนค่าได้ใน <code>config/local.php</code> (คัดลอกจาก <code>config/local.example.php</code>) ซึ่งอยู่ใน <code>.gitignore</code> แล้ว</p>
   </section>
 </div>
+<script src="../public/assets/js/photo-shrink.js"></script>
 </body>
 </html>

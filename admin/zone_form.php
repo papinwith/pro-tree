@@ -106,7 +106,7 @@ $v = fn($key, $default = '') => e((string) ($zone[$key] ?? $default));
 <div class="admin-wrap admin-wrap-narrow">
   <p><a class="btn-outline btn-sm" href="zones.php">&larr; กลับไปหน้าโซน</a></p>
   <h1><?= $id ? 'แก้ไขโซน' : 'เพิ่มโซน' ?></h1>
-  <p class="field-hint">กรอกเป็นภาษาไทยอย่างเดียว — ระบบจะแปลเป็นอังกฤษ/จีนให้อัตโนมัติตอนผู้เข้าชมเปิดหน้าต้นไม้ด้วยภาษานั้น<?= AI_ENABLED ? '' : ' (ต้องตั้งค่า Gemini API key ก่อน — ดูที่หน้า <a href="settings.php#ai-translation">ตั้งค่า</a>)' ?></p>
+  <p class="field-hint">กรอกเป็นภาษาไทยอย่างเดียว — ระบบจะแปลเป็นอังกฤษ/จีนให้อัตโนมัติตอนผู้เข้าชมเปิดหน้าต้นไม้ด้วยภาษานั้น<?= AI_ENABLED ? '' : ' (ปิดการแปลด้วย AI อยู่ — ดูที่หน้า <a href="settings.php#ai-translation">ตั้งค่า</a>)' ?></p>
 
   <?php foreach ($errors as $err): ?>
     <div class="flash error"><?= e($err) ?></div>

@@ -18,8 +18,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $deleted = count($rows);
 
         foreach ($rows as $tree) {
-            deletePublicFile($tree['image_path']);
-            deletePublicFile($tree['map_image_path']);
+            // The rows are already gone, so a file shared only among the
+            // deleted trees is unreferenced by now (and a repeat unlink of the
+            // same path is a harmless no-op); one still used by a tree that
+            // was NOT selected stays.
+            deletePublicFileIfUnreferenced($pdo, $tree['image_path']);
+            deletePublicFileIfUnreferenced($pdo, $tree['map_image_path']);
             deletePublicFile($tree['qr_code_path']);
         }
     }

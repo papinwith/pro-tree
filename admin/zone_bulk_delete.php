@@ -10,16 +10,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $ids = array_filter(array_map('intval', $_POST['ids'] ?? []));
     if ($ids) {
         $pdo = db();
-        $countStmt = $pdo->prepare('SELECT COUNT(*) FROM trees WHERE zone_id = :id');
         $deleteStmt = $pdo->prepare('DELETE FROM zones WHERE id = :id');
         foreach ($ids as $id) {
             // Same guard as zone_delete.php: refuse to delete a zone that
-            // still has trees assigned — reassign them first.
-            $countStmt->execute(['id' => $id]);
-            if ((int) $countStmt->fetchColumn() === 0) {
+            // still has trees or planting plans assigned — reassign them
+            // first. A foreign-key refusal that slips past the count is
+            // skipped too, rather than aborting the rest of the batch.
+            if (zoneUsageCount($pdo, $id) !== 0) {
+                $skipped++;
+                continue;
+            }
+            try {
                 $deleteStmt->execute(['id' => $id]);
                 $deleted++;
-            } else {
+            } catch (PDOException $e) {
+                if ($e->getCode() !== '23000') {
+                    throw $e;
+                }
                 $skipped++;
             }
         }

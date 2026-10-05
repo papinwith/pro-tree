@@ -19,7 +19,7 @@ throughout for the detail behind each subsystem.
 | 7 | Scan Location Tracking System | [`tree-identity-and-relationships.md`](tree-identity-and-relationships.md) §6 |
 | 8 | Map & Zone Management System | [`map-system.md`](map-system.md) |
 | 9 | Multilingual Content System | [`multilingual-and-ai-translation.md`](multilingual-and-ai-translation.md) |
-| 10 | AI Translation System (Google Gemini) | [`multilingual-and-ai-translation.md`](multilingual-and-ai-translation.md) |
+| 10 | AI Translation System (Ollama) | [`multilingual-and-ai-translation.md`](multilingual-and-ai-translation.md) |
 
 All ten are one PHP + MySQL application, not separate services — "system"
 here means a functional area, not a deployable unit. Nothing in this design
@@ -67,13 +67,13 @@ Extends the current layout additively — nothing existing moves.
 ```text
 pro tree/
 ├── config/
-│   ├── config.php          # existing — add GEMINI_API_KEY, GEMINI_MODEL (env-based, never committed)
+│   ├── config.php          # existing — add OLLAMA_URL, OLLAMA_MODEL, OLLAMA_VISION_MODEL
 │   └── db.php
 ├── includes/
 │   ├── auth.php            # requireAdmin(), requirePermission() — see rbac.md
 │   ├── functions.php       # existing shared helpers
 │   ├── lang.php            # existing i18n helpers
-│   ├── translation.php     # NEW — Gemini API client + translation_drafts CRUD (server-only)
+│   ├── translation.php     # NEW — Ollama client + translation_drafts CRUD (server-only)
 │   ├── geo.php             # NEW — haversine/point-in-polygon helpers for scan-location + map (see map-system.md)
 │   └── vendor/
 ├── public/                 # visitor-facing, no auth — unchanged in shape
@@ -94,7 +94,7 @@ pro tree/
 │   ├── public/               # no auth: tree lookup, scan logging, interest submit
 │   └── staff/                 # session + permission gated
 ├── storage/                  # NEW — kept outside public/ webroot
-│   └── translation_cache/     # optional: cache Gemini responses to control API cost
+│   └── translation_cache/     # optional: cache AI responses
 └── docs/
 ```
 
@@ -107,7 +107,7 @@ Design choices that keep the door open without over-building now:
 - **Read-heavy public endpoints** (`tree.php`, `api/public/*`) are single
   indexed-JOIN queries — cacheable behind `Cache-Control` headers later
   without a code change.
-- **Gemini calls are synchronous but isolated** to `includes/translation.php`
+- **Ollama calls are synchronous but isolated** to `includes/translation.php`
   — if translation volume ever grows, this is the one place to add a job
   queue without touching the rest of the app.
 - **GPS/scan-location writes are append-only** (`tree_scans`), same
@@ -126,7 +126,7 @@ there's one place to check before implementation:
 | Concern | Handling | Detail |
 |---|---|---|
 | Admin/role access control | Deny-by-default RBAC, checked server-side on every request, never just hidden in the UI | [`rbac.md`](rbac.md) §7–8 |
-| Gemini API key | Server-only (`includes/translation.php`), never sent to the browser; `gemini.config.manage` permission restricted to Programmer | [`multilingual-and-ai-translation.md`](multilingual-and-ai-translation.md) §5 |
+| Ollama settings | Server-only (`includes/translation.php`), never sent to the browser; `gemini.config.manage` permission restricted to Programmer | [`multilingual-and-ai-translation.md`](multilingual-and-ai-translation.md) §5 |
 | Visitor privacy / GPS | Location permission is opt-in at the browser level; a denial must not block the scan; only coarse, purpose-limited data is stored | [`tree-identity-and-relationships.md`](tree-identity-and-relationships.md) §6 |
 | Interest emails (PDPA-leaning) | Consent implied by explicit form submission; visible only to roles with `interest.view` | [`rbac.md`](rbac.md) §3–4 |
 | SQL injection | PDO prepared statements only, no exceptions — already the existing convention in `functions.php` | existing code |
