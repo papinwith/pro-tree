@@ -7,7 +7,7 @@ require_once __DIR__ . '/../config/config.php';
 
 function secondOpinionAvailable(): bool
 {
-    return GEMINI_API_KEY !== '';
+    return GEMINI_API_KEY !== '' || PLANTNET_API_KEY !== '';
 }
 
 /**

@@ -80,21 +80,30 @@ tell" instead of being shown as a name.
 The local model reports `confidence_pct` (0-100); the page shows it as e.g.
 "ความมั่นใจ: 82%". It is the model's own estimate, not a calibrated probability.
 
-When it is below `AI_CONFIDENCE_MIN` (default 70) and `GEMINI_API_KEY` is set, the
-same photo and prompt are also sent to Gemini (`GEMINI_MODEL`, default
-`gemini-3.5-flash-lite`; `includes/second_opinion.php`) and `applySecondOpinion()`
-merges the two answers:
+When it is below `AI_CONFIDENCE_MIN` (default 70), a second opinion is asked for
+(`askSecondOpinion()` in `includes/plant_identify.php`):
+
+1. **Pl@ntNet** (`PLANTNET_API_KEY`, `includes/plantnet.php`) - a plant-identification
+   service, preferred because it is far better than a general model on look-alike
+   species. In a quick check it got Cassia fistula and Tectona grandis right, the two
+   species the local model and the trained student kept missing. The free key allows
+   about 500 identifications per day. It returns only scientific/common names.
+2. **Gemini** (`GEMINI_API_KEY`, `GEMINI_MODEL`, `includes/second_opinion.php`) - used
+   only if Pl@ntNet is not configured or fails; it writes a full answer like the local model.
+
+`applySecondOpinion()` then merges the two:
 
 | Result | What happens |
 |---|---|
-| Same species | confidence = higher of the two + 10 (max 95) |
-| Different species | the more confident answer is the main one, the other goes to the alternatives, confidence - 20 |
-| No answer from Gemini | `second_opinion_status` is `no_key`, `no_time` (under ~6 s of the budget left) or `failed`; the local answer is kept |
+| Same species | confidence = higher of the two + 10 (max 95); the local write-up is kept |
+| Different species | the more confident answer is the main one, the other goes to the alternatives, confidence - 20. If the winner is Pl@ntNet, the Thai name and write-up are empty and a note says to fill them in by hand |
+| No answer | `second_opinion_status` is `no_key`, `no_time` (under ~6 s of the budget left) or `failed`; the local answer is kept |
 
 `needs_review` is true while the final confidence is still under the threshold, and
 the page then asks for a person who knows plants to check it, or a better photo.
-The photo only leaves the machine when this second opinion is actually requested.
-Two models agreeing is a good sign, not a guarantee: both can be wrong the same way.
+The photo only leaves the machine when a second opinion is actually requested.
+Two sources agreeing is a good sign, not a guarantee. Keys are server-side only
+(Railway variables); never commit them.
 
 ## Known limits
 

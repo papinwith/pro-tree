@@ -77,6 +77,11 @@ if (!defined('OLLAMA_API_KEY')) {
 // Second opinion: when the local model is not confident enough (below AI_CONFIDENCE_MIN, a
 // percentage), the photo is also sent to Gemini and the two answers are compared. Off unless
 // GEMINI_API_KEY is set (server-side only, never sent to the browser).
+// Pl@ntNet plant-identification API (https://my.plantnet.org) - the preferred "teacher" for a second
+// opinion; Gemini is used only when this is not configured or fails. Server-side only.
+if (!defined('PLANTNET_API_KEY')) {
+    define('PLANTNET_API_KEY', (string) (getenv('PLANTNET_API_KEY') ?: ''));
+}
 if (!defined('GEMINI_API_KEY')) {
     define('GEMINI_API_KEY', (string) (getenv('GEMINI_API_KEY') ?: ''));
 }

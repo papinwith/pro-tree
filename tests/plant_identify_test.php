@@ -143,6 +143,24 @@ check('no second opinion: answer unchanged, flagged when under the threshold', $
 check('a confident local answer is not flagged', applySecondOpinion($mk('ก', 'Aa bb', 88), null, 70)['needs_review'] === false);
 check('not-a-plant is never flagged or compared', applySecondOpinion($mk('', '', 0, false), $mk('ก', 'Aa bb', 90), 70)['needs_review'] === false);
 
+// --- Pl@ntNet as the teacher (response parsing and merge, no network) ---
+$pnJson = json_decode('{"results":[{"score":0.8612,"species":{"scientificNameWithoutAuthor":"Cassia fistula","commonNames":["Golden shower"]}},'
+    . '{"score":0.02,"species":{"scientificNameWithoutAuthor":"Cassia abbreviata","commonNames":[]}},{"score":0.01,"species":{"scientificNameWithoutAuthor":"Cassia javanica"}},{"score":"x"},{"species":{}}]}', true);
+$pn = parsePlantnetResults($pnJson);
+check('Pl@ntNet: best match, rounded percentage, common name and alternatives parsed',
+    $pn !== null && $pn['name_scientific'] === 'Cassia fistula' && $pn['name_common'] === 'Golden shower' && $pn['confidence_pct'] === 86
+    && count($pn['alternatives']) === 2 && $pn['alternatives'][0]['name_scientific'] === 'Cassia abbreviata', json_encode($pn));
+check('Pl@ntNet: empty or junk results give null', parsePlantnetResults([]) === null && parsePlantnetResults(['results' => [['score' => 'x']]]) === null);
+$pnNorm = normalizePlantIdentification(['is_plant' => true, 'name_scientific' => 'Cassia fistula', 'name_common' => 'Golden shower', 'confidence_pct' => 86, 'alternatives' => $pn['alternatives']]);
+$swap = applySecondOpinion($mk('สัก', 'Tectona grandis', 40), $pnNorm, 70, 'plantnet');
+check('Pl@ntNet disagrees and is surer: it becomes the main answer, source recorded, note says Thai name/details must be filled in by hand',
+    $swap['name_scientific'] === 'Cassia fistula' && $swap['answered_by'] === 'second' && $swap['second_opinion']['source'] === 'plantnet'
+    && $swap['confidence_pct'] === 66 && $swap['needs_review'] === true && str_contains($swap['notes_th'], 'Pl@ntNet') && $swap['name_th'] === '', json_encode($swap, JSON_UNESCAPED_UNICODE));
+$okPn = applySecondOpinion($mk('ราชพฤกษ์', 'Cassia fistula', 50), $pnNorm, 70, 'plantnet');
+check('Pl@ntNet agrees with the local model: the local write-up is kept and confidence rises',
+    $okPn['name_th'] === 'ราชพฤกษ์' && $okPn['confidence_pct'] === 96 - 1 && $okPn['second_opinion']['source'] === 'plantnet' && $okPn['needs_review'] === false, json_encode($okPn, JSON_UNESCAPED_UNICODE));
+check('the Pl@ntNet key never appears in the helper\'s source output or in error text', !str_contains((string) file_get_contents(__DIR__ . '/../includes/plantnet.php'), '2b10'));
+
 // The whole flow with a fake Ollama is covered by the HTTP tests below; here only the second-opinion decision,
 // using an injected "ask" so no Gemini call is made.
 $asked = [];

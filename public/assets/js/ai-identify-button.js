@@ -132,13 +132,14 @@
       if (second) {
         var secondName = second.name_th || second.name_scientific || '-';
         if (second.name_th && second.name_scientific) secondName += ' (' + second.name_scientific + ')';
+        var src = second.source === 'plantnet' ? 'Pl@ntNet' : 'Gemini';
         box.appendChild(el('p', 'field-hint', second.agrees
-          ? '✓ ถามความเห็นที่สองจาก Gemini แล้ว: ตรงกัน (' + second.confidence_pct + '%)'
-          : '⚠ ถามความเห็นที่สองจาก Gemini แล้ว: ต่างกัน — Gemini เห็นว่าเป็น ' + secondName + ' (' + second.confidence_pct + '%)'));
+          ? '✓ ถามความเห็นที่สองจาก ' + src + ' แล้ว: ตรงกัน (' + second.confidence_pct + '%)'
+          : '⚠ ถามความเห็นที่สองจาก ' + src + ' แล้ว: ต่างกัน — ' + src + ' เห็นว่าเป็น ' + secondName + ' (' + second.confidence_pct + '%)'));
       } else if (result.second_opinion_status === 'no_key') {
-        box.appendChild(el('p', 'field-hint', 'ความมั่นใจต่ำ แต่ยังไม่ได้ตั้งค่า Gemini สำหรับขอความเห็นที่สอง'));
+        box.appendChild(el('p', 'field-hint', 'ความมั่นใจต่ำ แต่ยังไม่ได้ตั้งค่า Pl@ntNet หรือ Gemini สำหรับขอความเห็นที่สอง'));
       } else if (result.second_opinion_status === 'no_time' || result.second_opinion_status === 'failed') {
-        box.appendChild(el('p', 'field-hint', 'ความมั่นใจต่ำ และขอความเห็นที่สองจาก Gemini ไม่สำเร็จ'));
+        box.appendChild(el('p', 'field-hint', 'ความมั่นใจต่ำ และขอความเห็นที่สองไม่สำเร็จ'));
       }
       if (result.needs_review) {
         box.appendChild(el('p', 'field-hint field-hint-error', 'ความมั่นใจยังต่ำ ควรให้ผู้ที่รู้จักต้นไม้ตรวจสอบก่อนบันทึก หรือถ่ายรูปใหม่ให้เห็นดอก ใบ หรือผลชัดๆ'));

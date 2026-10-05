@@ -6,6 +6,7 @@
 require_once __DIR__ . '/functions.php';
 require_once __DIR__ . '/ollama.php';
 require_once __DIR__ . '/second_opinion.php';
+require_once __DIR__ . '/plantnet.php';
 
 /**
  * Coerces whatever JSON the model returned into a predictable, bounded
@@ -197,6 +198,35 @@ function buildPlantIdentifyPrompt(?array $catalogue = null, ?array $knownSpecies
     return $prompt . "\nRespond with ONLY a JSON object of this exact shape (no markdown fences, no commentary):\n{" . $shape . '}';
 }
 
+/**
+ * Asks the real second-opinion services, Pl@ntNet first and then Gemini, within
+ * $budgetSeconds. Returns ['source' => 'plantnet'|'gemini', 'result' => <normalized>] or null.
+ */
+function askSecondOpinion(string $prompt, string $imageBytes, string $mimeType, float $budgetSeconds): ?array
+{
+    $started = microtime(true);
+    if (plantnetAvailable()) {
+        $err = null;
+        $pn = plantnetIdentify($imageBytes, $mimeType, min(25.0, $budgetSeconds), $err);
+        if ($pn !== null) {
+            return ['source' => 'plantnet', 'result' => normalizePlantIdentification([
+                'is_plant' => true, 'name_scientific' => $pn['name_scientific'], 'name_common' => $pn['name_common'],
+                'confidence_pct' => $pn['confidence_pct'], 'alternatives' => $pn['alternatives'],
+            ])];
+        }
+    }
+    $left = $budgetSeconds - (microtime(true) - $started);
+    if (GEMINI_API_KEY !== '' && $left >= 5.0) {
+        $err = null;
+        $text = geminiSecondOpinionText($prompt, $imageBytes, $mimeType, min(40.0, $left), $err);
+        $raw = $text === null ? null : json_decode($text, true);
+        if (is_array($raw)) {
+            return ['source' => 'gemini', 'result' => normalizePlantIdentification($raw)];
+        }
+    }
+    return null;
+}
+
 /** True when two identifications name the same species (scientific name, else exact Thai name). */
 function sameSpecies(array $a, array $b): bool
 {
@@ -220,7 +250,7 @@ function sameSpecies(array $a, array $b): bool
  * 'second') and needs_review (still under AI_CONFIDENCE_MIN). These percentages
  * are the models' own estimates combined by rule of thumb, not calibrated probabilities.
  */
-function applySecondOpinion(array $first, ?array $second, ?int $minConfidence = null): array
+function applySecondOpinion(array $first, ?array $second, ?int $minConfidence = null, string $source = 'gemini'): array
 {
     $min = $minConfidence ?? AI_CONFIDENCE_MIN;
     $result = $first + ['second_opinion' => null, 'answered_by' => 'local'];
@@ -228,7 +258,7 @@ function applySecondOpinion(array $first, ?array $second, ?int $minConfidence = 
     if ($second !== null && $second['is_plant'] && $first['is_plant']) {
         $agrees = sameSpecies($first, $second);
         $result['second_opinion'] = [
-            'source' => 'gemini',
+            'source' => $source,
             'agrees' => $agrees,
             'name_th' => $second['name_th'],
             'name_scientific' => $second['name_scientific'],
@@ -244,6 +274,10 @@ function applySecondOpinion(array $first, ?array $second, ?int $minConfidence = 
             $result['confidence_pct'] = max(5, $main['confidence_pct'] - 20);
             array_unshift($result['alternatives'], ['name_th' => $other['name_th'], 'name_scientific' => $other['name_scientific']]);
             $result['alternatives'] = array_slice($result['alternatives'], 0, 3);
+            if ($useSecond && $second['name_th'] === '' && $second['description_th'] === '') {
+                // The second source named the plant but wrote nothing else (Pl@ntNet gives only names).
+                $result['notes_th'] = 'ชื่อนี้มาจาก ' . ($source === 'plantnet' ? 'Pl@ntNet' : 'ความเห็นที่สอง') . ' ซึ่งให้เฉพาะชื่อ — ชื่อไทยและรายละเอียดต้องกรอกเอง';
+            }
         }
         $result['confidence'] = confidenceLabel($result['confidence_pct']);
     }
@@ -260,10 +294,12 @@ function applySecondOpinion(array $first, ?array $second, ?int $minConfidence = 
  * $budgetSeconds is a hard cap on the whole call, the second opinion included.
  * $knownSpecies (rows with name_scientific) are offered to the model as candidates.
  *
- * When the local answer is under AI_CONFIDENCE_MIN percent and GEMINI_API_KEY is
- * set, the same photo and prompt go to Gemini and applySecondOpinion() merges the
- * two. result.second_opinion_status says what happened: not_needed, asked,
- * no_key, no_time or failed. $askSecond is injectable for tests.
+ * When the local answer is under AI_CONFIDENCE_MIN percent, a second opinion is
+ * asked for - Pl@ntNet first (a plant specialist), Gemini if that is not set up or
+ * fails - and applySecondOpinion() merges the two. result.second_opinion_status
+ * says what happened: not_needed, asked, no_key, no_time or failed.
+ * $askSecond (prompt, bytes, mime, budget) => ['source' =>, 'result' =>] | null is
+ * injectable for tests.
  */
 function identifyPlantFromImage(string $imageBytes, string $mimeType, ?array $catalogue = null, float $budgetSeconds = 60.0, ?array $knownSpecies = null, ?callable $askSecond = null): array
 {
@@ -285,19 +321,20 @@ function identifyPlantFromImage(string $imageBytes, string $mimeType, ?array $ca
 
     $status = 'not_needed';
     $second = null;
+    $source = 'gemini';
     if ($first['is_plant'] && $first['confidence_pct'] < AI_CONFIDENCE_MIN) {
-        $ask = $askSecond ?? 'geminiSecondOpinionText';
         $remaining = $budgetSeconds - (microtime(true) - $startedAt);
         if ($askSecond === null && !secondOpinionAvailable()) {
             $status = 'no_key';
         } elseif ($remaining < 6.0) {
             $status = 'no_time';
         } else {
-            $secondError = null;
-            $secondText = $ask($prompt, $imageBytes, $mimeType, min(40.0, $remaining - 1.0), $secondError);
-            $secondRaw = $secondText === null ? null : json_decode($secondText, true);
-            if (is_array($secondRaw)) {
-                $second = normalizePlantIdentification($secondRaw);
+            $got = $askSecond !== null
+                ? $askSecond($prompt, $imageBytes, $mimeType, min(40.0, $remaining - 1.0))
+                : askSecondOpinion($prompt, $imageBytes, $mimeType, $remaining - 1.0);
+            if ($got !== null) {
+                $second = $got['result'];
+                $source = $got['source'];
                 $status = 'asked';
             } else {
                 $status = 'failed';
@@ -305,7 +342,7 @@ function identifyPlantFromImage(string $imageBytes, string $mimeType, ?array $ca
         }
     }
 
-    $result = applySecondOpinion($first, $second);
+    $result = applySecondOpinion($first, $second, null, $source);
     $result['second_opinion_status'] = $status;
     if ($catalogue !== null) {
         $result = constrainToCatalogue($result, $catalogue['categories'], $catalogue['subtypes']);

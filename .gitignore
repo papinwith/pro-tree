@@ -23,3 +23,11 @@ ml/models/
 
 # Photos uploaded through the admin forms while testing locally
 public/assets/uploads/species/
+
+# Personal notes that may contain pasted keys
+issu.md
+
+# Local-only AI conversation viewer (not part of the deployed project)
+ml/live_viewer.py
+ml/viewer.html
+ml/__pycache__/

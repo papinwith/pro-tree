@@ -21,9 +21,10 @@ ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data"
 
 
-def ask(url: str, model: str, names: list, img_path: Path, timeout: int, allow_none: bool) -> dict:
+def build_prompt(names: list, allow_none: bool) -> str:
+    """The question put to the teacher (shared with ml/live_viewer.py)."""
     listing = "\n".join(f"{i + 1}. {n}" for i, n in enumerate(names))
-    prompt = (
+    return (
         "You are a botanist. Which ONE of these species is shown in the photo?\n"
         f"{listing}\n"
         + (
@@ -33,6 +34,10 @@ def ask(url: str, model: str, names: list, img_path: Path, timeout: int, allow_n
         )
         + 'Reply with JSON only: {"species": "<exact scientific name from the list>", "confidence": "high|medium|low"}'
     )
+
+
+def ask(url: str, model: str, names: list, img_path: Path, timeout: int, allow_none: bool) -> dict:
+    prompt = build_prompt(names, allow_none)
     body = {
         "model": model,
         "messages": [{"role": "user", "content": prompt, "images": [base64.b64encode(img_path.read_bytes()).decode()]}],
