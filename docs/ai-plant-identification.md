@@ -94,6 +94,24 @@ accepts the local answer only when the species is already catalogued, since `tre
 - **First use:** the visitor downloads about 6 MB of model plus ONNX Runtime's ~11 MB WebAssembly once (then cached).
 - **Credits:** `public/assets/models/credits.csv` lists the photographers (CC-BY); the result panel links to it.
 
+## When the local model is down
+
+The local model (Qwen on Ollama) can be off, unreachable (your PC asleep, a tunnel that died), too slow or give nothing
+usable. If Pl@ntNet and/or Gemini are configured, `identifyWithoutLocalModel()` takes over instead of failing:
+
+| Configured | What answers |
+|---|---|
+| Gemini + Pl@ntNet | Gemini is the main answer (it can write the full Thai write-up); Pl@ntNet is the second opinion on the name, merged like the normal flow (agree: higher + 10, max 95; differ: the surer one wins and the other is listed) |
+| Gemini only | Gemini alone |
+| Pl@ntNet only | the name only; the page says the Thai name and write-up must be filled in by hand |
+| neither | the original error (e.g. "cannot connect to Ollama") |
+
+The result carries `main_source` (`qwen` / `gemini` / `plantnet`) and `fallback_note`, which the page shows as a warning.
+With a backup present the local model is given about 60 % of the time budget (at least 15 s), so a hang cannot starve
+the backup. Translation does the same: Ollama first (60 s when Gemini can back it up), then Gemini; with neither, the
+page keeps the Thai text. AI is reported enabled when **any** engine is configured; `OLLAMA_MODEL=off` switches only the
+local one off. Tested over real HTTP against mock services with Ollama pointed at a closed port: `php tests/failover_test.php`.
+
 ## Teaching "tree" from the teachers' answers
 
 When tree is not sure and the server AI is asked, the outcome can become a training photo (`includes/training_samples.php`,

@@ -31,7 +31,7 @@ function plantnetIdentify(string $imageBytes, string $mimeType, float $budgetSec
         return null;
     }
     try {
-        $ch = curl_init('https://my-api.plantnet.org/v2/identify/all?' . http_build_query(['api-key' => PLANTNET_API_KEY, 'lang' => 'en', 'nb-results' => 4]));
+        $ch = curl_init(PLANTNET_API_BASE . '/v2/identify/all?' . http_build_query(['api-key' => PLANTNET_API_KEY, 'lang' => 'en', 'nb-results' => 4]));
         curl_setopt_array($ch, [
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => ['images' => new CURLFile($tmp, $mimeType, 'photo'), 'organs' => 'auto'],

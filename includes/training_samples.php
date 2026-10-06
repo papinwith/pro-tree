@@ -71,7 +71,7 @@ function decideTrainingSample(array $result): ?array
     if (!is_array($second) || !array_key_exists('agrees', $second)) {
         return null;
     }
-    $teachers = 'qwen+' . preg_replace('/[^a-z]/', '', (string) ($second['source'] ?? 'second'));
+    $teachers = preg_replace('/[^a-z]/', '', (string) ($result['main_source'] ?? 'qwen')) . '+' . preg_replace('/[^a-z]/', '', (string) ($second['source'] ?? 'second'));
     if ($second['agrees']) {
         $name = canonicalSpeciesName((string) ($result['name_scientific'] ?? ''));
         return $name === '' ? null : ['status' => 'approved', 'source' => 'teachers', 'teachers' => $teachers, 'name' => $name];

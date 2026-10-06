@@ -202,29 +202,68 @@ function buildPlantIdentifyPrompt(?array $catalogue = null, ?array $knownSpecies
  * Asks the real second-opinion services, Pl@ntNet first and then Gemini, within
  * $budgetSeconds. Returns ['source' => 'plantnet'|'gemini', 'result' => <normalized>] or null.
  */
-function askSecondOpinion(string $prompt, string $imageBytes, string $mimeType, float $budgetSeconds): ?array
+function askSecondOpinion(string $prompt, string $imageBytes, string $mimeType, float $budgetSeconds, array $order = ['plantnet', 'gemini']): ?array
 {
     $started = microtime(true);
-    if (plantnetAvailable()) {
-        $err = null;
-        $pn = plantnetIdentify($imageBytes, $mimeType, min(25.0, $budgetSeconds), $err);
-        if ($pn !== null) {
-            return ['source' => 'plantnet', 'result' => normalizePlantIdentification([
-                'is_plant' => true, 'name_scientific' => $pn['name_scientific'], 'name_common' => $pn['name_common'],
-                'confidence_pct' => $pn['confidence_pct'], 'alternatives' => $pn['alternatives'],
-            ])];
+    foreach ($order as $which) {
+        $left = $budgetSeconds - (microtime(true) - $started);
+        if ($left < 2.0) {
+            break;
         }
-    }
-    $left = $budgetSeconds - (microtime(true) - $started);
-    if (GEMINI_API_KEY !== '' && $left >= 5.0) {
-        $err = null;
-        $text = geminiSecondOpinionText($prompt, $imageBytes, $mimeType, min(40.0, $left), $err);
-        $raw = $text === null ? null : json_decode($text, true);
-        if (is_array($raw)) {
-            return ['source' => 'gemini', 'result' => normalizePlantIdentification($raw)];
+        if ($which === 'plantnet' && plantnetAvailable()) {
+            $err = null;
+            $pn = plantnetIdentify($imageBytes, $mimeType, min(25.0, $left), $err);
+            if ($pn !== null) {
+                return ['source' => 'plantnet', 'result' => normalizePlantIdentification([
+                    'is_plant' => true, 'name_scientific' => $pn['name_scientific'], 'name_common' => $pn['name_common'],
+                    'confidence_pct' => $pn['confidence_pct'], 'alternatives' => $pn['alternatives'],
+                ])];
+            }
+        } elseif ($which === 'gemini' && GEMINI_API_KEY !== '') {
+            $err = null;
+            $text = geminiSecondOpinionText($prompt, $imageBytes, $mimeType, min(40.0, $left), $err);
+            $raw = $text === null ? null : json_decode($text, true);
+            if (is_array($raw)) {
+                return ['source' => 'gemini', 'result' => normalizePlantIdentification($raw)];
+            }
         }
     }
     return null;
+}
+
+/**
+ * The local model (Qwen on Ollama) is down, off, too slow or gave nothing usable, so the outside services answer instead:
+ * Gemini first (it can write the full Thai answer), then Pl@ntNet as an independent opinion on the name - or, when Gemini is
+ * not set up or fails, Pl@ntNet alone (names only; the page says the Thai name and write-up must be filled in by hand).
+ * Returns the merged, normalized result, or null if no outside service could answer. $ask is injectable for tests.
+ */
+function identifyWithoutLocalModel(string $prompt, string $imageBytes, string $mimeType, float $budgetSeconds, ?callable $ask = null): ?array
+{
+    $started = microtime(true);
+    $ask = $ask ?? static fn(string $p, string $b, string $m, float $t, array $order) => askSecondOpinion($p, $b, $m, $t, $order);
+    $main = $ask($prompt, $imageBytes, $mimeType, $budgetSeconds, ['gemini', 'plantnet']);
+    if ($main === null) {
+        return null;
+    }
+    $result = $main['result'];
+    $second = null;
+    $secondSource = 'plantnet';
+    // Gemini answered: a specialist's second look at the name raises or lowers confidence like the normal flow.
+    $left = $budgetSeconds - (microtime(true) - $started);
+    if ($main['source'] === 'gemini' && $result['is_plant'] && $left >= 4.0) {
+        $other = $ask($prompt, $imageBytes, $mimeType, $left - 1.0, ['plantnet']);
+        if ($other !== null && $other['source'] === 'plantnet') {
+            $second = $other['result'];
+        }
+    }
+    $merged = applySecondOpinion($result, $second, null, $secondSource);
+    $merged['main_source'] = $main['source'];
+    $merged['second_opinion_status'] = $second !== null ? 'asked' : 'not_needed';
+    if ($main['source'] === 'plantnet' && $merged['is_plant'] && $merged['name_th'] === '') {
+        $merged['notes_th'] = 'ชื่อนี้มาจาก Pl@ntNet ซึ่งให้เฉพาะชื่อ — ชื่อไทยและรายละเอียดต้องกรอกเอง';
+    }
+    $merged['fallback_note'] = 'ระบบ AI ในเครื่อง (Qwen) ใช้ไม่ได้ในขณะนี้ จึงใช้ ' . ($main['source'] === 'plantnet' ? 'Pl@ntNet' : 'Gemini') . ' แทน';
+    return $merged;
 }
 
 /** True when two identifications name the same species (scientific name, else exact Thai name). */
@@ -307,15 +346,25 @@ function identifyPlantFromImage(string $imageBytes, string $mimeType, ?array $ca
     $prompt = buildPlantIdentifyPrompt($catalogue, $knownSpecies);
     $error = null;
     $timedOut = false;
-    $innerText = ollamaGenerateText(OLLAMA_VISION_MODEL, $prompt, $budgetSeconds, base64_encode($imageBytes), $error, $timedOut);
+    $backupExists = $askSecond !== null || secondOpinionAvailable();
+    // With a backup available the local model gets most of the time, not all of it, so a hang cannot starve the backup.
+    $localBudget = $backupExists ? min($budgetSeconds, max(15.0, $budgetSeconds * 0.6)) : $budgetSeconds;
+    $innerText = ollamaGenerateText(OLLAMA_VISION_MODEL, $prompt, $localBudget, base64_encode($imageBytes), $error, $timedOut);
+    $raw = $innerText === null ? null : json_decode($innerText, true);
 
-    if ($innerText === null) {
-        return ['ok' => false, 'error' => $error ?? 'เรียกใช้บริการ AI ไม่สำเร็จ', 'timed_out' => $timedOut];
-    }
-
-    $raw = json_decode($innerText, true);
     if (!is_array($raw)) {
-        return ['ok' => false, 'error' => 'อ่านผลลัพธ์จาก AI ไม่ได้ กรุณาลองใหม่อีกครั้ง'];
+        $localProblem = $innerText === null ? ($error ?? 'เรียกใช้บริการ AI ไม่สำเร็จ') : 'อ่านผลลัพธ์จาก AI ไม่ได้ กรุณาลองใหม่อีกครั้ง';
+        $remaining = $budgetSeconds - (microtime(true) - $startedAt);
+        if ($backupExists && $remaining >= 5.0) {
+            $backup = identifyWithoutLocalModel($prompt, $imageBytes, $mimeType, $remaining - 0.5, $askSecond);
+            if ($backup !== null) {
+                if ($catalogue !== null) {
+                    $backup = constrainToCatalogue($backup, $catalogue['categories'], $catalogue['subtypes']);
+                }
+                return ['ok' => true, 'result' => $backup];
+            }
+        }
+        return ['ok' => false, 'error' => $localProblem, 'timed_out' => $timedOut && $innerText === null];
     }
     $first = normalizePlantIdentification($raw);
 
@@ -330,7 +379,7 @@ function identifyPlantFromImage(string $imageBytes, string $mimeType, ?array $ca
             $status = 'no_time';
         } else {
             $got = $askSecond !== null
-                ? $askSecond($prompt, $imageBytes, $mimeType, min(40.0, $remaining - 1.0))
+                ? $askSecond($prompt, $imageBytes, $mimeType, min(40.0, $remaining - 1.0), ['plantnet', 'gemini'])
                 : askSecondOpinion($prompt, $imageBytes, $mimeType, $remaining - 1.0);
             if ($got !== null) {
                 $second = $got['result'];
@@ -343,6 +392,7 @@ function identifyPlantFromImage(string $imageBytes, string $mimeType, ?array $ca
     }
 
     $result = applySecondOpinion($first, $second, null, $source);
+    $result['main_source'] = 'qwen';
     $result['second_opinion_status'] = $status;
     if ($catalogue !== null) {
         $result = constrainToCatalogue($result, $catalogue['categories'], $catalogue['subtypes']);

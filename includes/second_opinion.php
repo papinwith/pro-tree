@@ -15,21 +15,22 @@ function secondOpinionAvailable(): bool
  * Thai reason that is safe to show an admin (the provider's own message goes
  * to error_log, never to the browser).
  */
-function geminiSecondOpinionText(string $prompt, string $imageBytes, string $mimeType, float $budgetSeconds, ?string &$error = null): ?string
+function geminiSecondOpinionText(string $prompt, ?string $imageBytes, string $mimeType, float $budgetSeconds, ?string &$error = null): ?string
 {
     $error = null;
     if (!secondOpinionAvailable()) {
         $error = 'ยังไม่ได้ตั้งค่า GEMINI_API_KEY';
         return null;
     }
-    $ch = curl_init('https://generativelanguage.googleapis.com/v1beta/models/' . rawurlencode(GEMINI_MODEL) . ':generateContent');
+    $ch = curl_init(GEMINI_API_BASE . '/v1beta/models/' . rawurlencode(GEMINI_MODEL) . ':generateContent');
     curl_setopt_array($ch, [
         CURLOPT_POST => true,
         CURLOPT_POSTFIELDS => json_encode([
-            'contents' => [['parts' => [
+            // $imageBytes null = a text-only request (translation)
+            'contents' => [['parts' => array_values(array_filter([
                 ['text' => $prompt],
-                ['inline_data' => ['mime_type' => $mimeType, 'data' => base64_encode($imageBytes)]],
-            ]]],
+                $imageBytes !== null ? ['inline_data' => ['mime_type' => $mimeType, 'data' => base64_encode($imageBytes)]] : null,
+            ]))]],
             'generationConfig' => ['response_mime_type' => 'application/json'],
         ]),
         CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'X-goog-api-key: ' . GEMINI_API_KEY],

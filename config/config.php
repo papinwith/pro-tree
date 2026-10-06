@@ -85,6 +85,13 @@ if (!defined('TRAINING_EXPORT_TOKEN')) {
 
 // Pl@ntNet plant-identification API (https://my.plantnet.org) - the preferred "teacher" for a second
 // opinion; Gemini is used only when this is not configured or fails. Server-side only.
+// Base URLs of the two outside services - only ever overridden by the tests, which point them at local mock servers.
+if (!defined('PLANTNET_API_BASE')) {
+    define('PLANTNET_API_BASE', rtrim(getenv('PLANTNET_API_BASE') ?: 'https://my-api.plantnet.org', '/'));
+}
+if (!defined('GEMINI_API_BASE')) {
+    define('GEMINI_API_BASE', rtrim(getenv('GEMINI_API_BASE') ?: 'https://generativelanguage.googleapis.com', '/'));
+}
 if (!defined('PLANTNET_API_KEY')) {
     define('PLANTNET_API_KEY', (string) (getenv('PLANTNET_API_KEY') ?: ''));
 }
@@ -99,12 +106,17 @@ if (!defined('AI_CONFIDENCE_MIN')) {
 }
 if (!defined('OLLAMA_MODEL')) {
     $ollamaModelEnv = getenv('OLLAMA_MODEL');
-    define('OLLAMA_MODEL', $ollamaModelEnv === false ? 'qwen3:8b' : $ollamaModelEnv);
+    // An empty value, or "off", turns the local model off ("off" because some systems cannot set an empty variable).
+    $ollamaOff = $ollamaModelEnv !== false && in_array(strtolower(trim($ollamaModelEnv)), ['', 'off', 'none', 'disabled'], true);
+    define('OLLAMA_MODEL', $ollamaModelEnv === false ? 'qwen3:8b' : ($ollamaOff ? '' : $ollamaModelEnv));
 }
 if (!defined('OLLAMA_VISION_MODEL')) {
     define('OLLAMA_VISION_MODEL', getenv('OLLAMA_VISION_MODEL') ?: 'qwen2.5vl:7b');
 }
-define('AI_ENABLED', OLLAMA_MODEL !== '');
+// The local engine (Ollama) and the outside ones (Pl@ntNet, Gemini) back each other up: when Ollama is down or
+// switched off, the outside ones answer instead. AI features are on when ANY engine is configured.
+define('OLLAMA_ENABLED', OLLAMA_MODEL !== '');
+define('AI_ENABLED', OLLAMA_ENABLED || PLANTNET_API_KEY !== '' || GEMINI_API_KEY !== '');
 
 // Hard cap, in seconds, on how long one "identify this tree from a photo" request
 // may take end to end (checked from the moment the request starts). If the AI

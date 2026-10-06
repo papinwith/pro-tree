@@ -8,6 +8,7 @@
 // over a translation problem.
 require_once __DIR__ . '/functions.php';
 require_once __DIR__ . '/ollama.php';
+require_once __DIR__ . '/second_opinion.php';
 
 /** Species fields eligible for AI translation, in display order. Thai is
  *  always the source; name_scientific is deliberately excluded — Latin
@@ -69,7 +70,12 @@ function aiTranslateFields(array $thaiFieldsByKey, array $targetLangs): ?array
     // A species with all 8 translatable fields filled in (a few hundred words
     // of Thai) can take a local 8B model a minute or more, plus extra on the
     // first call while it loads into memory.
-    $innerText = ollamaGenerateText(OLLAMA_MODEL, $prompt, 180);
+    // Ollama first (local, free); if it is down or off, Gemini translates instead (when a key is set).
+    $outsideBackup = GEMINI_API_KEY !== '';
+    $innerText = OLLAMA_ENABLED ? ollamaGenerateText(OLLAMA_MODEL, $prompt, $outsideBackup ? 60 : 180) : null;
+    if ($innerText === null && $outsideBackup) {
+        $innerText = geminiSecondOpinionText($prompt, null, '', 60);
+    }
     if ($innerText === null) {
         return null;
     }

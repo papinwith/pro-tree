@@ -128,6 +128,7 @@
       if (names.length) box.appendChild(el('p', 'field-hint', names.join(' · ')));
       var pct = typeof result.confidence_pct === 'number' ? ' ' + result.confidence_pct + '%' : '';
       box.appendChild(el('p', 'field-hint', 'ความมั่นใจ:' + pct + ' (' + (CONFIDENCE_LABELS[result.confidence] || result.confidence) + ') — เป็นค่าประมาณจาก AI ไม่ใช่การรับประกัน'));
+      if (result.fallback_note) box.appendChild(el('p', 'field-hint', '⚠ ' + result.fallback_note));
       var second = result.second_opinion;
       if (second) {
         var secondName = second.name_th || second.name_scientific || '-';

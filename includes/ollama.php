@@ -19,8 +19,8 @@ function ollamaGenerateText(string $model, string $prompt, float $budgetSeconds,
 {
     $error = null;
     $timedOut = false;
-    if (!AI_ENABLED || $model === '') {
-        $error = 'ปิดการใช้งาน AI อยู่ (OLLAMA_MODEL ว่าง)';
+    if (!OLLAMA_ENABLED || $model === '') {
+        $error = 'ปิดการใช้งาน Ollama อยู่ (OLLAMA_MODEL ว่าง)';
         return null;
     }
 

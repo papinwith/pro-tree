@@ -125,20 +125,23 @@ $openingHours = $errors ? ($openingHours ?? '') : getSetting($pdo, 'opening_hour
   <p class="field-hint">ต้นไม้แต่ละต้นสามารถกำหนดค่าเฉพาะของตัวเองแทนค่านี้ได้ในแบบฟอร์มแก้ไขต้นไม้ — ข้อมูลติดต่อ/เวลาทำการด้านบนจะแสดงในหน้าต้นไม้ที่ลูกค้าเห็นตอนสแกน QR</p>
 
   <section id="ai-translation" class="history-section">
-    <h2>AI (Ollama) — คำแปล และระบุชนิดต้นไม้จากรูป</h2>
+    <h2>AI — คำแปล และระบุชนิดต้นไม้จากรูป</h2>
     <?php if (AI_ENABLED): ?>
-      <div class="flash">✓ เปิดใช้งานแล้ว — แปลด้วย <code><?= e(OLLAMA_MODEL) ?></code>, ระบุรูปด้วย <code><?= e(OLLAMA_VISION_MODEL) ?></code> ที่ <code><?= e(OLLAMA_URL) ?></code></div>
+      <div class="flash">✓ เปิดใช้งานอยู่ — ถ้าตัวหลักใช้ไม่ได้ ตัวสำรองจะรับช่วงต่ออัตโนมัติ</div>
     <?php else: ?>
-      <div class="flash error">✗ ปิดการใช้งาน AI อยู่ (OLLAMA_MODEL ว่าง)</div>
+      <div class="flash error">✗ ปิดการใช้งาน AI อยู่ (ยังไม่ได้ตั้งค่าตัวใดเลย)</div>
     <?php endif; ?>
+    <table class="field-hint">
+      <tr><td><strong>tree</strong> (ในเบราว์เซอร์ผู้ใช้)</td><td>ตอบก่อนเสมอ ถ้ามั่นใจตั้งแต่ 90%</td></tr>
+      <tr><td><strong>Ollama</strong> (ในเครื่องของคุณ)</td><td><?= OLLAMA_ENABLED ? '✓ ตั้งไว้ — แปลด้วย <code>' . e(OLLAMA_MODEL) . '</code>, ระบุรูปด้วย <code>' . e(OLLAMA_VISION_MODEL) . '</code> ที่ <code>' . e(OLLAMA_URL) . '</code>' : '— ปิดอยู่ (OLLAMA_MODEL=off)' ?></td></tr>
+      <tr><td><strong>Pl@ntNet</strong></td><td><?= PLANTNET_API_KEY !== '' ? '✓ ตั้งค่าแล้ว — ถามเป็นความเห็นที่สอง และรับช่วงต่อเมื่อ Ollama ล่ม' : '— ยังไม่ได้ตั้ง PLANTNET_API_KEY' ?></td></tr>
+      <tr><td><strong>Gemini</strong></td><td><?= GEMINI_API_KEY !== '' ? '✓ ตั้งค่าแล้ว — รับช่วงต่อเมื่อ Ollama ล่ม (ระบุรูปและแปลภาษา)' : '— ยังไม่ได้ตั้ง GEMINI_API_KEY' ?></td></tr>
+    </table>
     <p class="field-hint">
-      ใช้ Ollama ที่รันในเครื่อง ไม่ต้องใช้ API key — เปิดโปรแกรม Ollama ทิ้งไว้ แล้วติดตั้งโมเดลครั้งเดียว:
+      Ollama ใช้ฟรีและรูปไม่ออกนอกเครื่อง ติดตั้งโมเดลครั้งเดียว: <code>ollama pull qwen3:8b</code> (แปลภาษา) และ <code>ollama pull qwen2.5vl:7b</code> (ระบุรูป) แล้วเปิดโปรแกรม Ollama ทิ้งไว้
+      ถ้าเชื่อมต่อ Ollama ไม่ได้ ระบบจะถาม Gemini/Pl@ntNet แทนโดยอัตโนมัติ (หน้าผลลัพธ์จะบอกว่าใช้ตัวสำรอง) ถ้าไม่มีตัวสำรองเลย คำแปลจะแสดงเป็นภาษาไทย และการระบุจากรูปจะแจ้งข้อผิดพลาด
+      ต้องการปิด Ollama ให้ตั้ง <code>OLLAMA_MODEL=off</code>
     </p>
-    <ol class="field-hint">
-      <li><code>ollama pull qwen3:8b</code> — แปลภาษา</li>
-      <li><code>ollama pull qwen2.5vl:7b</code> — ปุ่ม "ให้ AI ช่วยระบุชนิดต้นไม้จากรูป"</li>
-    </ol>
-    <p class="field-hint">ถ้าเชื่อมต่อ Ollama ไม่ได้ คำแปลจะแสดงเป็นภาษาไทยแทน และการระบุจากรูปจะแจ้งข้อผิดพลาด (บนโฮสต์อื่นให้ตั้ง environment variable <code>OLLAMA_URL</code>, <code>OLLAMA_MODEL</code>, <code>OLLAMA_VISION_MODEL</code>)</p>
     <p class="field-hint muted-note">เปลี่ยนค่าได้ใน <code>config/local.php</code> (คัดลอกจาก <code>config/local.example.php</code>) ซึ่งอยู่ใน <code>.gitignore</code> แล้ว</p>
   </section>
 </div>
