@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../includes/functions.php';
 require_once __DIR__ . '/../includes/translation.php';
+require_once __DIR__ . '/../includes/page_translation.php';
 
 $pdo = db();
 
@@ -70,25 +71,16 @@ $contactPhone = getSetting($pdo, 'contact_phone', '');
 $contactLine = getSetting($pdo, 'contact_line', '');
 $contactAddress = getSetting($pdo, 'contact_address', '');
 $openingHours = getSetting($pdo, 'opening_hours', '');
+// Admin only ever enters Thai. English/Chinese are cached in the database, and the page is built from what is cached right
+// now (Thai wherever there is no translation yet) - it never waits for the AI. If anything is missing, the browser asks
+// public/translate_page.php to translate it in one call after the page has shown, and reloads once (page-translate.js).
+$needsTranslation = false;
 if ($locale !== 'th') {
-    // Up to 5 sequential AI calls can land below (contact address,
-    // opening hours, species, zone, category), each allowed up to 180s on a
-    // cache miss — comfortably past PHP's default 30s max_execution_time.
-    // Only raised on this non-Thai, cache-miss-possible path; the Thai path
-    // above never calls out to the model at all.
-    set_time_limit(600);
-    $contactAddress = ensureSettingTranslated($pdo, 'contact_address', $contactAddress, $locale);
-    $openingHours = ensureSettingTranslated($pdo, 'opening_hours', $openingHours, $locale);
-}
-
-// Admin only ever enters Thai — EN/ZH are generated on first view in that
-// language and cached on the species/zone rows, so this only calls the model
-// once per species/zone per language, not on every request.
-if ($locale !== 'th') {
-    $tree = ensureSpeciesTranslated($pdo, $tree, $locale);
-
-    $translatedZone = ensureZoneTranslated($pdo, (int) $tree['zone_id'], $locale);
-    $tree['zone_name_' . $locale] = $translatedZone['name_' . $locale] ?? ($tree['zone_name_' . $locale] ?? null);
+    $cachedAddress = trim((string) getSetting($pdo, 'contact_address_' . $locale, ''));
+    $cachedHours = trim((string) getSetting($pdo, 'opening_hours_' . $locale, ''));
+    $contactAddress = $cachedAddress !== '' ? $cachedAddress : $contactAddress;
+    $openingHours = $cachedHours !== '' ? $cachedHours : $openingHours;
+    $needsTranslation = AI_ENABLED && treePageMissing($pdo, $tree, $locale) !== [];
 }
 
 $treeName = localizedTreeField($tree, 'name');
@@ -99,9 +91,6 @@ $treeDescription = localizedTreeField($tree, 'description');
 // the category badge silently disappears for every species added after
 // classification_id was retired from the admin form.
 $category = !empty($tree['category_code']) ? getCategoryByCode($pdo, $tree['category_code']) : null;
-if ($category && $locale !== 'th') {
-    $category = ensureCategoryTranslated($pdo, $tree['category_code'], $locale);
-}
 $categoryName = $category ? ($category['name_' . $locale] ?? $category['name_th']) : null;
 $saleStatus = speciesSaleStatus($pdo, (int) $tree['species_id']);
 $saleStatusLabels = [
@@ -129,7 +118,7 @@ $detailSections = [
 <title><?= e($treeName) ?> <?= e(t('tree_page_title_suffix')) ?></title>
 <link rel="stylesheet" href="<?= e($base) ?>/assets/css/style.css">
 </head>
-<body>
+<body<?php if ($needsTranslation): ?> data-translate-url="translate_page.php" data-translate-type="tree" data-translate-id="<?= (int) $tree['id'] ?>" data-translate-lang="<?= e($locale) ?>" data-translate-notice="<?= e(t('translating_notice')) ?>"<?php endif; ?>>
 <div class="page">
 
   <div class="lang-switch">
@@ -348,5 +337,6 @@ $detailSections = [
   }
 })();
 </script>
+<?php if ($needsTranslation): ?><script src="<?= e($base) ?>/assets/js/page-translate.js"></script><?php endif; ?>
 </body>
 </html>

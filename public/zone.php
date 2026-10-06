@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../includes/functions.php';
 require_once __DIR__ . '/../includes/translation.php';
+require_once __DIR__ . '/../includes/page_translation.php';
 
 $pdo = db();
 
@@ -17,9 +18,8 @@ if (!$zone) {
 
 $locale = currentLocale();
 
-if ($locale !== 'th') {
-    $zone = ensureZoneTranslated($pdo, $zoneId, $locale);
-}
+// Built from what is cached now (Thai where untranslated); the missing part is translated after the page has shown.
+$needsTranslation = $locale !== 'th' && AI_ENABLED && zonePageMissing($pdo, $zoneId, $locale) !== [];
 
 $zoneName = localizedTreeField($zone, 'name');
 $zoneDescription = localizedTreeField($zone, 'description');
@@ -34,7 +34,7 @@ $trees = getTreesByZone($pdo, $zoneId);
 <title><?= e($zoneName) ?> <?= e(t('zone_page_title_suffix')) ?></title>
 <link rel="stylesheet" href="<?= e($base) ?>/assets/css/style.css">
 </head>
-<body>
+<body<?php if ($needsTranslation): ?> data-translate-url="translate_page.php" data-translate-type="zone" data-translate-id="<?= (int) $zoneId ?>" data-translate-lang="<?= e($locale) ?>" data-translate-notice="<?= e(t('translating_notice')) ?>"<?php endif; ?>>
 <div class="page">
 
   <div class="lang-switch">
@@ -72,5 +72,6 @@ $trees = getTreesByZone($pdo, $zoneId);
 
   </div>
 </div>
+<?php if ($needsTranslation): ?><script src="<?= e($base) ?>/assets/js/page-translate.js"></script><?php endif; ?>
 </body>
 </html>

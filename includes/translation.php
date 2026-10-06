@@ -35,7 +35,7 @@ function translatableSpeciesFields(): array
  * Returns ['en' => ['field' => text, ...]] (and/or 'zh') or null on any
  * failure (network error, bad status, malformed response).
  */
-function aiTranslateFields(array $thaiFieldsByKey, array $targetLangs): ?array
+function aiTranslateFields(array $thaiFieldsByKey, array $targetLangs, float $budgetSeconds = 120.0, ?callable $engine = null): ?array
 {
     if (!AI_ENABLED || !$thaiFieldsByKey || !$targetLangs) {
         return null;
@@ -67,14 +67,20 @@ function aiTranslateFields(array $thaiFieldsByKey, array $targetLangs): ?array
         . '{' . implode(', ', $shape) . '}' . "\n"
         . "Include every field key listed above.";
 
-    // A species with all 8 translatable fields filled in (a few hundred words
-    // of Thai) can take a local 8B model a minute or more, plus extra on the
-    // first call while it loads into memory.
-    // Ollama first (local, free); if it is down or off, Gemini translates instead (when a key is set).
-    $outsideBackup = GEMINI_API_KEY !== '';
-    $innerText = OLLAMA_ENABLED ? ollamaGenerateText(OLLAMA_MODEL, $prompt, $outsideBackup ? 60 : 180) : null;
-    if ($innerText === null && $outsideBackup) {
-        $innerText = geminiSecondOpinionText($prompt, null, '', 60);
+    // A visitor is waiting for this, so the fast engine goes first: Gemini (a few seconds) when a key is set, and the local
+    // model (a minute or more on a small GPU) only if Gemini is not set up or fails. $engine (prompt, budget) => text is for tests.
+    $started = microtime(true);
+    if ($engine !== null) {
+        $innerText = $engine($prompt, $budgetSeconds);
+    } else {
+        $innerText = null;
+        if (GEMINI_API_KEY !== '') {
+            $innerText = geminiSecondOpinionText($prompt, null, '', min(45.0, $budgetSeconds));
+        }
+        $left = $budgetSeconds - (microtime(true) - $started);
+        if ($innerText === null && OLLAMA_ENABLED && $left >= 10.0) {
+            $innerText = ollamaGenerateText(OLLAMA_MODEL, $prompt, $left - 1.0);
+        }
     }
     if ($innerText === null) {
         return null;

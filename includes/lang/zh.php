@@ -14,6 +14,7 @@ return [
     // tree info page (public/tree.php)
     'tree_page_title_suffix' => '— 植物信息',
     'zone_label' => '分区',
+    'translating_notice' => '正在翻译本页…请稍候',
     'care_instructions_label' => '养护方法',
     'characteristics_label' => '特征',
     'properties_label' => '特性',

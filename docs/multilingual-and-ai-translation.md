@@ -1,5 +1,31 @@
 # Multilingual Content & Ollama AI Translation
 
+## 0. Switching language is instant (current behaviour)
+
+Admins write Thai only; English and Chinese are AI translations cached in the database. The public pages
+(`public/tree.php`, `public/zone.php`) are built **at once** from what is cached (Thai wherever a translation does
+not exist yet) - they never wait for the AI. If something is missing, the page carries `data-translate-url` and
+`public/assets/js/page-translate.js` asks `public/translate_page.php` (after the page has shown) to translate **everything
+the page lacks - species, zone, category and the contact texts - in one AI call**, store it, and reload the page once
+("Translating this page..." notice meanwhile). Before this the first visitor of each language waited, with a blank page,
+for up to five AI calls in a row.
+
+- **Fast engine first:** Gemini (seconds) when `GEMINI_API_KEY` is set, otherwise the local model. One batched page
+  took 55.7 s on the local model alone (13 strings), a few seconds on Gemini.
+- **Cost is bounded** even though visitors trigger it: only existing, untranslated content is sent; a stored translation
+  is never redone or overwritten; one request per page+language at a time (others get "busy" and ask again); after a
+  failure the AI is left alone for that page for 5 minutes; the script tries at most once per page and language per
+  browser session, so a failing translation can never become a reload loop.
+- **Translate in advance:** Settings -> "แปลล่วงหน้า" (`admin/translate_warm.php`) translates every species, zone,
+  category and the contact texts into English and Chinese, one small step at a time, with progress. Run it **before an
+  exhibition** so nobody waits at all; it can be repeated (it only fills what is missing).
+- Tests: `php tests/page_translation_test.php` (27 checks), `python tests/page_translate_js_check.py` (visitor side,
+  headless Chromium: appears at once, reloads once, never loops).
+
+The older sections below describe the original design (a review queue) and are kept for history.
+
+
+
 Design only — no application code yet.
 
 ## 1. Content Model — kept as-is, not restructured

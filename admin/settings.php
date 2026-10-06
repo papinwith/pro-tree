@@ -144,6 +144,59 @@ $openingHours = $errors ? ($openingHours ?? '') : getSetting($pdo, 'opening_hour
     </p>
     <p class="field-hint muted-note">เปลี่ยนค่าได้ใน <code>config/local.php</code> (คัดลอกจาก <code>config/local.example.php</code>) ซึ่งอยู่ใน <code>.gitignore</code> แล้ว</p>
   </section>
+
+  <section id="translate-warm" class="history-section">
+    <h2>แปลล่วงหน้า (อังกฤษ + จีน)</h2>
+    <p class="field-hint">
+      ผู้เข้าชมที่เปลี่ยนภาษา จะเห็นหน้าทันที และถ้าเนื้อหายังไม่เคยถูกแปล ระบบจะแปลให้เบื้องหลังแล้วรีเฟรชหนึ่งครั้ง (ใช้เวลาหลายวินาที)
+      กดปุ่มนี้ <strong>ก่อนงานจัดแสดง</strong> เพื่อแปลทุกชนิดพันธุ์ โซน ประเภท และข้อมูลติดต่อไว้ล่วงหน้า ผู้ชมจะได้ไม่ต้องรอเลย
+      (ทำซ้ำได้ — แปลเฉพาะส่วนที่ยังไม่มีคำแปล และไม่เขียนทับคำแปลที่มีอยู่แล้ว)
+    </p>
+    <?php if (AI_ENABLED): ?>
+      <p><button class="btn" type="button" id="warmStart">แปลทั้งหมดล่วงหน้าตอนนี้</button> <span id="warmStatus" class="field-hint"></span></p>
+      <div class="bar" style="height:8px;background:#e5e7eb;border-radius:4px;overflow:hidden;max-width:420px"><i id="warmBar" style="display:block;height:100%;width:0;background:#3b82f6"></i></div>
+      <input type="hidden" id="warmToken" value="<?= e(csrfToken()) ?>">
+      <script>
+      (function () {
+        var btn = document.getElementById('warmStart'), status = document.getElementById('warmStatus'), bar = document.getElementById('warmBar');
+        var token = document.getElementById('warmToken').value;
+        function post(fields) {
+          var body = new URLSearchParams(Object.assign({ csrf_token: token }, fields));
+          return fetch('translate_warm.php', { method: 'POST', body: body, credentials: 'same-origin' }).then(function (r) { return r.json(); });
+        }
+        btn.addEventListener('click', async function () {
+          btn.disabled = true; status.textContent = 'กำลังวางแผน…';
+          var failures = 0, stored = 0, stepNo = 0;
+          try {
+            var plan = await post({ action: 'plan' });
+            if (!plan.ok) throw new Error(plan.error || 'วางแผนไม่สำเร็จ');
+            var steps = [];
+            plan.langs.forEach(function (lang) {
+              plan.species.forEach(function (sp) { steps.push({ task: 'species', id: sp.id, lang: lang, label: sp.name + ' (' + lang + ')' }); });
+              steps.push({ task: 'shared', lang: lang, label: 'โซน/ประเภท/ข้อมูลติดต่อ (' + lang + ')' });
+            });
+            var consecutive = 0;
+            for (var i = 0; i < steps.length; i++) {
+              var st = steps[i];
+              status.textContent = 'แปล ' + (i + 1) + '/' + steps.length + ': ' + st.label;
+              bar.style.width = Math.round(i / steps.length * 100) + '%';
+              var r = await post({ action: 'run', task: st.task, id: st.id || '', lang: st.lang }).catch(function () { return { ok: false }; });
+              if (r.ok && r.status !== 'failed') { consecutive = 0; stored += r.stored || 0; }
+              else { failures++; consecutive++; if (consecutive >= 3) throw new Error('AI ไม่ตอบ 3 ครั้งติดกัน — หยุดไว้ก่อน (เปิด Ollama / ตรวจคีย์ Gemini แล้วกดใหม่ได้ ระบบทำต่อจากที่ค้าง)'); }
+            }
+            bar.style.width = '100%';
+            status.textContent = 'เสร็จแล้ว — แปลเพิ่ม ' + stored + ' ข้อความ' + (failures ? ' (มี ' + failures + ' ขั้นที่ไม่สำเร็จ กดใหม่เพื่อลองซ้ำ)' : '');
+          } catch (e) {
+            status.textContent = 'หยุด: ' + e.message;
+          }
+          btn.disabled = false;
+        });
+      })();
+      </script>
+    <?php else: ?>
+      <div class="flash error">ปิดการใช้งาน AI อยู่ — ตั้งค่า Ollama หรือ Gemini ก่อนจึงจะแปลล่วงหน้าได้</div>
+    <?php endif; ?>
+  </section>
 </div>
 <script src="../public/assets/js/photo-shrink.js"></script>
 </body>

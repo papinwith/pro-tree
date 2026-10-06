@@ -14,6 +14,7 @@ return [
     // tree info page (public/tree.php)
     'tree_page_title_suffix' => '— ข้อมูลต้นไม้',
     'zone_label' => 'โซน',
+    'translating_notice' => 'กำลังแปลหน้านี้… กรุณารอสักครู่',
     'care_instructions_label' => 'วิธีดูแล',
     'characteristics_label' => 'ลักษณะ',
     'properties_label' => 'คุณสมบัติ',

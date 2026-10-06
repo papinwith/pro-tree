@@ -14,6 +14,7 @@ return [
     // tree info page (public/tree.php)
     'tree_page_title_suffix' => '— Tree Information',
     'zone_label' => 'Zone',
+    'translating_notice' => 'Translating this page… one moment please',
     'care_instructions_label' => 'Care Instructions',
     'characteristics_label' => 'Characteristics',
     'properties_label' => 'Properties',
