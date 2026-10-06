@@ -3,8 +3,10 @@
  "labels_mode": "gbif",
  "classes": [
   "Acronychia pedunculata",
+  "Adenium obesum",
   "Adiantum capillus-veneris",
   "Adiantum philippense",
+  "Aechmea fasciata",
   "Aeginetia indica",
   "Aglaia elliptica",
   "Aglaia lawii",
@@ -34,6 +36,7 @@
   "Baccaurea ramiflora",
   "Baliospermum calycinum",
   "Barringtonia acutangula",
+  "Bauhinia blakeana",
   "Bauhinia saccocalyx",
   "Bauhinia viridescens",
   "Bhesa paniculata",
@@ -45,6 +48,7 @@
   "Breynia retusa",
   "Bridelia ovata",
   "Bridelia tomentosa",
+  "Buxus microphylla",
   "Cajanus goensis",
   "Calamus javensis",
   "Callicarpa arborea",
@@ -116,6 +120,7 @@
   "Engelhardia spicata",
   "Epipremnum aureum",
   "Euonymus cochinchinensis",
+  "Euonymus japonicus",
   "Euphorbia hirta",
   "Excoecaria cochinchinensis",
   "Ficus deltoidea",
@@ -161,6 +166,7 @@
   "Leea indica",
   "Leptonychia caudata",
   "Leucaena leucocephala",
+  "Ligustrum ovalifolium",
   "Lindsaea ensifolia",
   "Lithocarpus elegans",
   "Lithocarpus sundaicus",
@@ -192,6 +198,7 @@
   "Microsorum scolopendria",
   "Microstegium fasciculatum",
   "Mimosa pudica",
+  "Monstera deliciosa",
   "Nauclea subdita",
   "Nelumbo nucifera",
   "Nepenthes gracilis",
@@ -201,6 +208,7 @@
   "Nymphaea sp.",
   "Ochna integerrima",
   "Ocimum tenuiflorum",
+  "Olea europaea",
   "Oplismenus compositus",
   "Oreocnide rubescens",
   "Oryza sativa",
@@ -289,11 +297,16 @@
  ],
  "resize": 256,
  "test": {
-  "top1": 0.49601227045059204,
-  "top3": 0.6757668852806091,
-  "answered": 0.2674846649169922,
-  "accuracy_when_answered": 0.8910550475120544,
-  "photos": 3260
+  "top1": 0.5223624110221863,
+  "top3": 0.6866399049758911,
+  "answered": 0.29357796907424927,
+  "accuracy_when_answered": 0.8916015625,
+  "photos": 3488
  },
- "app_threshold": 0.9
+ "app_threshold": 0.9,
+ "published_check": {
+  "test_photos": 3488,
+  "answers_at_gate": 326,
+  "accuracy_at_gate": 0.9785
+ }
 }

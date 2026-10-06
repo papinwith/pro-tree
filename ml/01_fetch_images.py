@@ -113,8 +113,11 @@ def main() -> None:
         out_dir.mkdir(parents=True, exist_ok=True)
         got = have.get(binomial, 0)
         cands = []
+        known_sources = {r["source_url"] for r in rows if r.get("gbif_label") == binomial}  # top-ups must not download the same photo twice
         try:
             for c in photo_urls(key, args.per_species):
+                if c[3] in known_sources:
+                    continue
                 cands.append(c)
                 if len(cands) >= args.per_species * 3:
                     break

@@ -4,7 +4,8 @@ Takes held-out TEST photos, asks the trained model in Python (the reference), th
 through public/assets/js/tree-model.js in headless Chromium (ONNX Runtime Web, the code the website runs) and
 compares: same top-1 species, size of the probability difference, and whether the 90 % gate would decide alike.
 Needs internet once (the ONNX Runtime library comes from the CDN, as on the website) and a Chromium from
-Playwright's cache. Uses ml/data_sea and ml/models (not in git), so it is run by hand:
+Playwright's cache. Uses ml/data_sea and ml/models (not in git), so it is run by hand (TREE_MODEL=<name> picks which trained model
+is compared with the one published in public/assets/models, default tree_sea):
 
     python tests/tree_browser_check.py [--photos 60]
 """
@@ -80,7 +81,7 @@ def main() -> None:
 
     net = models.mobilenet_v3_small()
     net.classifier[3] = nn.Linear(net.classifier[3].in_features, len(classes))
-    net.load_state_dict(torch.load(ROOT / "ml" / "models" / "tree_sea.pt", map_location="cpu")["state_dict"])
+    net.load_state_dict(torch.load(ROOT / "ml" / "models" / (os.environ.get("TREE_MODEL", "tree_sea") + ".pt"), map_location="cpu")["state_dict"])
     net.eval()
     tf = T.Compose([T.Resize(256), T.CenterCrop(224), T.ToTensor(), T.Normalize(meta["mean"], meta["std"])])
     expected = []

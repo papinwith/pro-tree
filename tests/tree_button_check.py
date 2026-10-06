@@ -114,7 +114,7 @@ def pick_photos():
     rows = [r for r in csv.DictReader(open(DATA / "images.csv", encoding="utf-8")) if r["gbif_label"] in cidx]
     net = models.mobilenet_v3_small()
     net.classifier[3] = nn.Linear(net.classifier[3].in_features, len(classes))
-    net.load_state_dict(torch.load(ROOT / "ml" / "models" / "tree_sea.pt", map_location="cpu")["state_dict"])
+    net.load_state_dict(torch.load(ROOT / "ml" / "models" / (os.environ.get("TREE_MODEL", "tree_sea") + ".pt"), map_location="cpu")["state_dict"])
     net.eval()
     tf = T.Compose([T.Resize(256), T.CenterCrop(224), T.ToTensor(), T.Normalize(meta["mean"], meta["std"])])
     sure = unsure = None

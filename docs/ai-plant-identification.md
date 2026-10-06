@@ -106,8 +106,11 @@ least 90 % sure (`app_threshold` in `tree.labels.json`) and the species exists i
 the photo goes to the server AI as described below. A form that asks for the full write-up (`data-detail="full"`)
 accepts the local answer only when the species is already catalogued, since `tree` knows names, not care texts.
 
-- **Coverage:** 273 species. On held-out GBIF photos, answers at >= 90 % confidence were right 97.5 % of the time
-  but covered only 7.5 % of photos (15 % for the 27 catalogue species) - so most requests still reach the server AI.
+- **Coverage:** 281 species (the version published 2026-10-06, `tree_v2`; it includes the 8 species actually growing in the garden,
+  which the first version did not know). On held-out GBIF photos, answers at >= 90 % confidence were right 97.9 % of the time
+  but covered only 9.3 % of photos - so most requests still reach the server AI. Per garden species (top-1 on unseen photos):
+  Adenium 90 %, Buxus 93 %, Olea 87 %, Aechmea 77 %, Monstera 73 %, Bauhinia 67 %, Ligustrum 53 %, Euonymus 50 %, Mangifera 33 %;
+  the two look-alike hedge shrubs (Ligustrum, Euonymus) are the weak spot.
   Photos taken in the exhibition may differ from GBIF's, so these numbers can be optimistic.
 - **Tests:** `python tests/tree_browser_check.py` (browser vs Python give the same answer; 60/60 and a probability
   difference of at most 0.004 when written) and `python tests/tree_button_check.py` (the button's four paths).
