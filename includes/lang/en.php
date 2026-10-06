@@ -14,6 +14,11 @@ return [
     // tree info page (public/tree.php)
     'tree_page_title_suffix' => '— Tree Information',
     'zone_label' => 'Zone',
+    'spin_label' => 'Tree turning 360°',
+    'spin_hint' => 'Drag to look around the tree',
+    'spin_play' => 'Play the turn',
+    'spin_pause' => 'Pause the turn',
+    'spin_loading' => 'Loading the 360° view {n}/{total}',
     'translating_notice' => 'Translating this page… one moment please',
     'care_instructions_label' => 'Care Instructions',
     'characteristics_label' => 'Characteristics',

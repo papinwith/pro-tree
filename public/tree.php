@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../includes/functions.php';
 require_once __DIR__ . '/../includes/translation.php';
 require_once __DIR__ . '/../includes/page_translation.php';
+require_once __DIR__ . '/../includes/spin.php';
 
 $pdo = db();
 
@@ -44,6 +45,8 @@ $mapImage = $tree['map_image_path'] ?: getSetting($pdo, 'default_map_image', '')
 // The tree's own photo wins; otherwise fall back to the species photo so a
 // bulk-created tree without its own picture still shows one.
 $treeImagePath = $tree['image_path'] ?: ($tree['species_image_path'] ?? null);
+// A 360-degree spin of this tree, if staff recorded one (kept in the database, see includes/spin.php).
+$spin = getTreeSpin($pdo, (int) $tree['id']);
 $siteLogo = getSetting($pdo, 'site_logo', '');
 
 // --- Zone pins overlaid on the map banner — too many trees to pin
@@ -151,7 +154,16 @@ $detailSections = [
       <div class="flash <?= $flash['type'] === 'error' ? 'error' : '' ?>"><?= e($flash['text']) ?></div>
     <?php endif; ?>
 
-    <?php if ($treeImagePath): ?>
+    <?php if ($spin): ?>
+      <div data-spin
+           data-src="<?= e($base) ?>/spin_frame.php?tree=<?= (int) $tree['id'] ?>&amp;t=<?= e($spin['token']) ?>&amp;i="
+           data-count="<?= (int) $spin['frame_count'] ?>"
+           <?php if ($treeImagePath): ?>data-poster="<?= e($base . '/' . ltrim($treeImagePath, '/')) ?>"<?php endif; ?>
+           data-label="<?= e(t('spin_label')) ?>" data-hint="<?= e(t('spin_hint')) ?>"
+           data-play-label="<?= e(t('spin_play')) ?>" data-pause-label="<?= e(t('spin_pause')) ?>" data-loading-label="<?= e(t('spin_loading')) ?>">
+        <?php if ($treeImagePath): ?><img class="spin-poster" src="<?= e($base . '/' . ltrim($treeImagePath, '/')) ?>" alt="<?= e($treeName) ?>"><?php endif; ?>
+      </div>
+    <?php elseif ($treeImagePath): ?>
       <img class="tree-image" id="treeImage" src="<?= e($base . '/' . ltrim($treeImagePath, '/')) ?>" alt="<?= e($treeName) ?>" tabindex="0" role="button" aria-label="<?= e(t('expand_image_label')) ?>">
     <?php endif; ?>
 
@@ -337,6 +349,7 @@ $detailSections = [
   }
 })();
 </script>
+<?php if ($spin): ?><script src="<?= e($base) ?>/assets/js/spin-viewer.js"></script><?php endif; ?>
 <?php if ($needsTranslation): ?><script src="<?= e($base) ?>/assets/js/page-translate.js"></script><?php endif; ?>
 </body>
 </html>

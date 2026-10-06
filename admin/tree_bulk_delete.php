@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/spin.php';
 requirePermission('tree.status.manage');
 
 $deleted = 0;
@@ -15,6 +16,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $rows = $stmt->fetchAll();
 
         $pdo->prepare("DELETE FROM trees WHERE id IN ($in)")->execute($ids);
+        foreach ($ids as $deletedId) {
+            deleteTreeSpin($pdo, (int) $deletedId);
+        }
         $deleted = count($rows);
 
         foreach ($rows as $tree) {

@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/spin.php';
 requirePermission('tree.status.manage');
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -12,6 +13,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $tree = $stmt->fetch();
 
         $pdo->prepare('DELETE FROM trees WHERE id = :id')->execute(['id' => $id]);
+        deleteTreeSpin($pdo, $id);
 
         if ($tree) {
             // Photo/map files can be shared with sibling trees created in the

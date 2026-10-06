@@ -14,6 +14,11 @@ return [
     // tree info page (public/tree.php)
     'tree_page_title_suffix' => '— 植物信息',
     'zone_label' => '分区',
+    'spin_label' => '360° 环绕查看树木',
+    'spin_hint' => '拖动即可环绕查看',
+    'spin_play' => '播放环绕',
+    'spin_pause' => '暂停环绕',
+    'spin_loading' => '正在加载 360° 视图 {n}/{total}',
     'translating_notice' => '正在翻译本页…请稍候',
     'care_instructions_label' => '养护方法',
     'characteristics_label' => '特征',

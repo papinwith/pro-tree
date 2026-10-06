@@ -656,6 +656,38 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
   <?php endif; ?>
 
   <?php if ($id): ?>
+  <?php require_once __DIR__ . '/../includes/spin.php'; $currentSpin = getTreeSpin($pdo, $id); ?>
+  <section id="spin" class="history-section" data-spin-capture data-tree-id="<?= (int) $id ?>" data-endpoint="spin_upload.php" data-csrf="<?= e(csrfToken()) ?>">
+    <h2>ภาพหมุน 360° รอบต้นไม้</h2>
+    <p class="field-hint">
+      ผู้เข้าชมจะเห็นต้นไม้ <strong>หมุนรอบตัวเองต่อเนื่องเหมือน GIF</strong> และลากเพื่อหมุนดูเองได้ — ถ่ายวิดีโอสั้นๆ ขณะ <strong>เดินวนรอบต้นไม้ช้าๆ ครบ 1 รอบ</strong>
+      (ประมาณ 15–30 วินาที ถือมือถือแนวนอนหรือแนวตั้งก็ได้ ให้ต้นไม้อยู่กลางภาพและระยะห่างคงที่) แล้วเลือกไฟล์ด้านล่าง ระบบจะเลือกเฟรมให้เองในเครื่องของคุณ
+      หรือจะเลือกเป็นรูปถ่ายหลายรูปที่ถ่ายรอบต้น (ตั้งชื่อไฟล์เรียงตามลำดับ) ก็ได้
+    </p>
+    <?php if ($currentSpin): ?>
+      <p class="field-hint">ภาพหมุนปัจจุบัน (<?= (int) $currentSpin['frame_count'] ?> เฟรม):</p>
+      <div style="max-width:420px" data-spin
+           data-src="../public/spin_frame.php?tree=<?= (int) $id ?>&amp;t=<?= e($currentSpin['token']) ?>&amp;i=" data-count="<?= (int) $currentSpin['frame_count'] ?>"
+           data-label="ภาพหมุน 360°" data-hint="ลากเพื่อหมุน" data-play-label="เล่น" data-pause-label="หยุด" data-loading-label="กำลังโหลด {n}/{total}"></div>
+    <?php else: ?>
+      <p class="field-hint">ต้นไม้ต้นนี้ยังไม่มีภาพหมุน</p>
+    <?php endif; ?>
+    <label>วิดีโอที่เดินวนรอบต้นไม้</label>
+    <input type="file" accept="video/*" data-spin-video>
+    <label>หรือ รูปถ่ายหลายรูปรอบต้น (อย่างน้อย 8 รูป)</label>
+    <input type="file" accept="image/*" multiple data-spin-photos>
+    <label>จำนวนเฟรมจากวิดีโอ (12–72 — มากขึ้น = หมุนลื่นขึ้นแต่ไฟล์ใหญ่ขึ้น)</label>
+    <input type="number" min="12" max="72" value="36" data-spin-count style="max-width:120px">
+    <div style="max-width:420px;margin-top:10px" data-spin-preview></div>
+    <div style="height:8px;background:#e5e7eb;border-radius:4px;overflow:hidden;max-width:420px;margin:8px 0"><i data-spin-bar style="display:block;height:100%;width:0;background:#3b82f6"></i></div>
+    <p data-spin-status class="field-hint"></p>
+    <p class="btn-row">
+      <button type="button" class="btn" data-spin-save hidden>บันทึกภาพหมุน</button>
+      <?php if ($currentSpin): ?><button type="button" class="btn btn-danger btn-sm" data-spin-delete data-confirm="ลบภาพหมุนของต้นไม้ต้นนี้?">ลบภาพหมุน</button><?php endif; ?>
+    </p>
+    <?php if ($w = uploadsPersistenceWarning()): ?><p class="field-hint muted-note">หมายเหตุ: ภาพหมุนเก็บในฐานข้อมูลจึงไม่หายเมื่อ deploy แต่รูปถ่ายธรรมดาของต้นไม้ยังเสี่ยงหาย — ดูคำเตือนที่หน้าแรกของผู้ดูแล</p><?php endif; ?>
+  </section>
+
   <section id="observations" class="history-section">
     <h2>ประวัติการสำรวจ (Observation)</h2>
     <?php if ($observations): ?>
@@ -756,6 +788,8 @@ if (!empty($tree['species_id']) && isset($speciesById[(int) $tree['species_id']]
 <?php require __DIR__ . '/_confirm_modal.php'; ?>
 <script src="../public/assets/js/gps-map-picker.js"></script>
 <script src="../public/assets/js/image-preview.js"></script>
+<?php if ($id): ?><script src="../public/assets/js/spin-viewer.js"></script>
+<script src="../public/assets/js/spin-capture.js"></script><?php endif; ?>
 <script src="../public/assets/js/tree-model.js"></script>
 <script src="../public/assets/js/ai-identify-button.js"></script>
 <script src="../public/assets/js/geolocate-button.js"></script>

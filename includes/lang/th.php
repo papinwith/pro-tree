@@ -14,6 +14,11 @@ return [
     // tree info page (public/tree.php)
     'tree_page_title_suffix' => '— ข้อมูลต้นไม้',
     'zone_label' => 'โซน',
+    'spin_label' => 'ภาพหมุนรอบต้นไม้ 360°',
+    'spin_hint' => 'ลากเพื่อหมุนดูรอบต้น',
+    'spin_play' => 'เล่นภาพหมุน',
+    'spin_pause' => 'หยุดภาพหมุน',
+    'spin_loading' => 'กำลังโหลดภาพหมุน {n}/{total}',
     'translating_notice' => 'กำลังแปลหน้านี้… กรุณารอสักครู่',
     'care_instructions_label' => 'วิธีดูแล',
     'characteristics_label' => 'ลักษณะ',

@@ -832,3 +832,37 @@ h1.tree-name { font-size: 1.65rem; font-weight: 800; margin: 18px 0 2px; letter-
   z-index: 0;
 }
 .gps-map-tall { height: 480px; }
+
+/* =================================================================
+   360-degree spin (public/assets/js/spin-viewer.js)
+   ================================================================= */
+.spin {
+  position: relative;
+  width: 100%;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--gray-100);
+  box-shadow: var(--shadow-sm);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.spin-canvas { display: block; width: 100%; height: auto; cursor: grab; outline-offset: -3px; }
+.spin-canvas:active { cursor: grabbing; }
+.spin-poster { display: block; width: 100%; height: 240px; object-fit: cover; }
+.spin-failed .spin-poster { display: block !important; }
+.spin-status {
+  position: absolute; left: 10px; bottom: 10px; padding: 3px 10px; border-radius: 999px;
+  background: rgba(0, 0, 0, .55); color: #fff; font-size: 12px; pointer-events: none;
+}
+.spin-status:empty { display: none; }
+.spin-toggle {
+  position: absolute; right: 10px; bottom: 10px; width: 38px; height: 38px; border: 0; border-radius: 50%;
+  background: rgba(0, 0, 0, .55); color: #fff; font-size: 16px; line-height: 1; cursor: pointer;
+}
+.spin-toggle:hover, .spin-toggle:focus-visible { background: rgba(0, 0, 0, .75); }
+.spin-hint {
+  position: absolute; left: 50%; top: 12px; transform: translateX(-50%); padding: 4px 14px; border-radius: 999px;
+  background: rgba(0, 0, 0, .55); color: #fff; font-size: 13px; pointer-events: none; white-space: nowrap;
+}
+.spin-hint[hidden], .spin-toggle[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) { .spin-hint { display: none; } }

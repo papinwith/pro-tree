@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/spin.php';
 requirePermission('tree.view');
 
 $pdo = db();
@@ -84,6 +85,10 @@ $pageUrl = fn(int $p) => '?' . http_build_query(array_filter(
     </div>
     <?php require __DIR__ . '/_nav.php'; ?>
   </div>
+
+  <?php if ($uploadsWarning = uploadsPersistenceWarning()): ?>
+    <div class="flash error"><strong>รูปที่อัปโหลดจะหาย:</strong> <?= e($uploadsWarning) ?></div>
+  <?php endif; ?>
 
   <?php if ($reprintId): ?>
     <div class="flash">
