@@ -1089,55 +1089,96 @@ function generateTreeQrCode(int $treeId): string
  */
 function generateDatabaseBackupSql(PDO $pdo): string
 {
-    $tables = $pdo->query(
-        "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename"
-    )->fetchAll(PDO::FETCH_COLUMN);
+    $out = '';
+    streamDatabaseBackupSql($pdo, function (string $chunk) use (&$out): void {
+        $out .= $chunk;
+    });
+    return $out;
+}
 
-    $out = "-- tree_qr_system data backup — generated " . date('Y-m-d H:i:s') . "\n";
-    $out .= "-- Data only (see generateDatabaseBackupSql() for why). Restore: run\n";
-    $out .= "-- docs/install.postgres.sql for structure first, then load this file, e.g.:\n";
-    $out .= "--   psql \"\$DATABASE_URL\" -f this_file.sql\n";
-    $out .= "-- This file first EMPTIES every table below (install.postgres.sql seeds\n";
-    $out .= "-- demo rows that would otherwise collide with these), so only load it\n";
-    $out .= "-- into a database whose current data you are happy to replace.\n\n";
+/**
+ * The same backup, handed to $emit piece by piece instead of built as one string. Rows are written one at a time, and the
+ * tables that hold photos as text (spin frames, training samples) are read a few rows at a time by id, so even a database
+ * full of 360-degree photos never has to fit in PHP's memory limit. $tables and $driver default to the live PostgreSQL
+ * database; tests pass SQLite.
+ */
+function streamDatabaseBackupSql(PDO $pdo, callable $emit, ?array $tables = null, int $heavyChunkRows = 10): void
+{
+    $driver = (string) $pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+    $tables ??= $pdo->query("SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename")->fetchAll(PDO::FETCH_COLUMN);
+    $heavy = ['tree_spin_frames', 'training_samples', 'species_details_cache'];
+
+    $emit("-- tree_qr_system data backup — generated " . date('Y-m-d H:i:s') . "\n"
+        . "-- Data only (see generateDatabaseBackupSql() for why). Restore: run\n"
+        . "-- docs/install.postgres.sql for structure first, then load this file, e.g.:\n"
+        . "--   psql \"\$DATABASE_URL\" -f this_file.sql\n"
+        . "-- This file first EMPTIES every table below (install.postgres.sql seeds\n"
+        . "-- demo rows that would otherwise collide with these), so only load it\n"
+        . "-- into a database whose current data you are happy to replace.\n\n");
     if ($tables) {
-        $out .= 'TRUNCATE ' . implode(', ', array_map(fn($t) => '"' . $t . '"', $tables)) . " RESTART IDENTITY CASCADE;\n\n";
+        $emit('TRUNCATE ' . implode(', ', array_map(fn($t) => '"' . $t . '"', $tables)) . " RESTART IDENTITY CASCADE;\n\n");
     }
-    $out .= "SET session_replication_role = 'replica'; -- suspend FK checks while loading\n\n";
+    $emit("SET session_replication_role = 'replica'; -- suspend FK checks while loading\n\n");
+
+    $insert = function (string $table, array $row) use ($pdo): string {
+        $values = array_map(
+            // pgsql hands booleans back as PHP bool; (string) false is '', which is not valid boolean input.
+            fn($v) => $v === null ? 'NULL' : (is_bool($v) ? ($v ? 'TRUE' : 'FALSE') : $pdo->quote((string) $v)),
+            array_values($row)
+        );
+        return 'INSERT INTO "' . $table . '" (' . implode(', ', array_map(fn($c) => '"' . $c . '"', array_keys($row))) . ') VALUES ('
+            . implode(', ', $values) . ");\n";
+    };
 
     foreach ($tables as $table) {
-        $rows = $pdo->query('SELECT * FROM "' . $table . '"')->fetchAll(PDO::FETCH_ASSOC);
-        foreach ($rows as $row) {
-            $columns = array_keys($row);
-            $values = array_map(
-                // pgsql hands booleans back as PHP bool; (string) false is '', which is not valid boolean input.
-                fn($v) => $v === null ? 'NULL' : (is_bool($v) ? ($v ? 'TRUE' : 'FALSE') : $pdo->quote((string) $v)),
-                array_values($row)
-            );
-            $quotedColumns = array_map(fn($c) => '"' . $c . '"', $columns);
-            $out .= 'INSERT INTO "' . $table . '" (' . implode(', ', $quotedColumns) . ') VALUES ('
-                . implode(', ', $values) . ");\n";
+        $any = false;
+        if (in_array($table, $heavy, true)) {
+            // read by id in small batches: each row can carry hundreds of KB of base64 photo
+            $last = null;
+            while (true) {
+                $stmt = $pdo->prepare('SELECT * FROM "' . $table . '"' . ($last === null ? '' : ' WHERE ' . ($table === 'species_details_cache' ? 'name_scientific > :last' : 'id > :last'))
+                    . ' ORDER BY ' . ($table === 'species_details_cache' ? 'name_scientific' : 'id') . ' LIMIT ' . (int) $heavyChunkRows);
+                $stmt->execute($last === null ? [] : ['last' => $last]);
+                $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                if (!$rows) {
+                    break;
+                }
+                foreach ($rows as $row) {
+                    $emit($insert($table, $row));
+                    $any = true;
+                }
+                $lastRow = end($rows);
+                $last = $table === 'species_details_cache' ? $lastRow['name_scientific'] : $lastRow['id'];
+                unset($rows, $stmt);
+            }
+        } else {
+            $stmt = $pdo->query('SELECT * FROM "' . $table . '"');
+            while (($row = $stmt->fetch(PDO::FETCH_ASSOC)) !== false) {
+                $emit($insert($table, $row));
+                $any = true;
+            }
         }
-        if ($rows) {
-            $out .= "\n";
+        if ($any) {
+            $emit("\n");
         }
     }
 
-    $out .= "SET session_replication_role = 'origin';\n\n";
+    $emit("SET session_replication_role = 'origin';\n\n");
 
     // The rows above carry explicit ids, so the sequences behind serial/identity
     // columns still sit at their start: move each past the highest restored id.
-    $sequenced = $pdo->query(
-        "SELECT table_name, column_name FROM information_schema.columns
-         WHERE table_schema = 'public' AND (column_default LIKE 'nextval(%' OR is_identity = 'YES')
-         ORDER BY table_name, ordinal_position"
-    )->fetchAll(PDO::FETCH_ASSOC);
-    foreach ($sequenced as $col) {
-        $t = '"' . $col['table_name'] . '"';
-        $c = '"' . $col['column_name'] . '"';
-        $out .= "SELECT setval(pg_get_serial_sequence('$t', '{$col['column_name']}'), COALESCE(MAX($c), 1), MAX($c) IS NOT NULL) FROM $t;\n";
+    if ($driver === 'pgsql') {
+        $sequenced = $pdo->query(
+            "SELECT table_name, column_name FROM information_schema.columns
+             WHERE table_schema = 'public' AND (column_default LIKE 'nextval(%' OR is_identity = 'YES')
+             ORDER BY table_name, ordinal_position"
+        )->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($sequenced as $col) {
+            $t = '"' . $col['table_name'] . '"';
+            $c = '"' . $col['column_name'] . '"';
+            $emit("SELECT setval(pg_get_serial_sequence('$t', '{$col['column_name']}'), COALESCE(MAX($c), 1), MAX($c) IS NOT NULL) FROM $t;\n");
+        }
     }
-    return $out;
 }
 
 /**
