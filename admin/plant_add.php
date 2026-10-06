@@ -555,6 +555,7 @@ $selectedSubtypeIds = $form['subtype_ids'] ?? [];
 </div>
 <script src="../public/assets/js/gps-map-picker.js"></script>
 <script src="../public/assets/js/image-preview.js"></script>
+<script src="../public/assets/js/tree-model.js"></script>
 <script src="../public/assets/js/ai-identify-button.js"></script>
 <script src="../public/assets/js/geolocate-button.js"></script>
 <script src="../public/assets/js/photo-capture-buttons.js"></script>

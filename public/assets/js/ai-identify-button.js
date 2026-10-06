@@ -171,6 +171,12 @@
         box.appendChild(el('p', 'field-hint', 'ที่เป็นไปได้อื่นๆ: ' + alts.join(', ')));
       }
       if (result.matched_species_name) box.appendChild(el('p', 'field-hint', 'มีชนิดนี้ในระบบแล้ว: ' + result.matched_species_name));
+      if (result.answered_by === 'tree' && window.TreeModel) {
+        var credit = el('p', 'field-hint', 'โมเดลนี้เรียนจากภาพถ่ายลิขสิทธิ์เปิด (CC0/CC-BY) จาก GBIF/iNaturalist — ');
+        var creditLink = el('a', '', 'รายชื่อผู้ถ่ายภาพ');
+        creditLink.href = window.TreeModel.creditsUrl; creditLink.target = '_blank'; creditLink.rel = 'noopener';
+        credit.appendChild(creditLink); box.appendChild(credit);
+      }
       box.appendChild(el('p', 'field-hint', 'AI อาจระบุผิดได้ — ตรวจสอบก่อนบันทึกทุกครั้ง'));
 
       var requireMatch = wrapper.dataset.requireMatch === '1';
@@ -226,17 +232,50 @@
       var abort = new AbortController();
       var giveUp = setTimeout(function () { abort.abort(); }, NETWORK_GIVE_UP_MS);
 
-      sourceBlob()
-        .then(downscale)
-        .then(function (blob) {
+      // The small "tree" model runs first, inside this browser: when it is at least 90% sure, its answer is used
+      // as it is (no photo upload, no server AI). Anything else - not sure, model not loadable - goes to the server
+      // AI as before. A form that asks for the full write-up (data-detail="full") only accepts the local answer when
+      // it names a species already in the system, because "tree" only knows names, not care instructions.
+      function tryTree(original) {
+        if (!window.TreeModel) return Promise.resolve(null);
+        return window.TreeModel.classify(original).then(function (r) {
+          if (!r || r.p < r.threshold) return null;
           var data = new FormData();
           data.append('csrf_token', tokenField.value);
-          data.append('image', blob, 'photo.jpg');
-          if (wrapper.dataset.detail === 'full') data.append('detail', 'full');
-          return fetch(wrapper.dataset.endpoint, { method: 'POST', body: data, credentials: 'same-origin', signal: abort.signal });
-        })
-        .then(function (response) {
-          return response.json().catch(function () { return { ok: false, error: 'ได้รับการตอบกลับที่อ่านไม่ได้ (HTTP ' + response.status + ')' }; });
+          data.append('name_scientific', r.name);
+          return fetch(wrapper.dataset.endpoint.replace(/identify_tree\.php$/, 'identify_match.php'), { method: 'POST', body: data, credentials: 'same-origin', signal: abort.signal })
+            .then(function (res) { return res.json(); })
+            .then(function (m) {
+              if (!m.ok) return null;
+              if (wrapper.dataset.detail === 'full' && !m.matched_species_id) return null;
+              return {
+                is_plant: true, name_th: m.matched_species_name || '', name_common: '', name_scientific: r.name,
+                confidence: 'high', confidence_pct: Math.round(r.p * 100), description_th: '',
+                notes_th: 'ระบุโดยโมเดล tree ที่รันในเครื่องของคุณ (ไม่ได้ส่งรูปออกไปยังเซิร์ฟเวอร์ AI)',
+                alternatives: r.top3.slice(1).map(function (c) { return { name_th: '', name_scientific: c.name }; }),
+                matched_species_id: m.matched_species_id, matched_species_name: m.matched_species_name,
+                second_opinion: null, answered_by: 'tree', needs_review: false
+              };
+            });
+        }).catch(function () { return null; }); // any trouble with the local model: use the server AI instead
+      }
+
+      sourceBlob()
+        .then(function (original) {
+          return tryTree(original).then(function (local) {
+            if (local) return { ok: true, result: local };
+            return downscale(original)
+              .then(function (blob) {
+                var data = new FormData();
+                data.append('csrf_token', tokenField.value);
+                data.append('image', blob, 'photo.jpg');
+                if (wrapper.dataset.detail === 'full') data.append('detail', 'full');
+                return fetch(wrapper.dataset.endpoint, { method: 'POST', body: data, credentials: 'same-origin', signal: abort.signal });
+              })
+              .then(function (response) {
+                return response.json().catch(function () { return { ok: false, error: 'ได้รับการตอบกลับที่อ่านไม่ได้ (HTTP ' + response.status + ')' }; });
+              });
+          });
         })
         .then(function (payload) {
           if (payload.ok) renderResult(payload.result);

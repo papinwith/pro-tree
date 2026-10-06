@@ -75,6 +75,25 @@ nursery stocks; the wording tells the model to ignore the list unless the photo
 clearly matches. An answer of "Unknown ..." / "ไม่ทราบ" is treated as "could not
 tell" instead of being shown as a name.
 
+## The in-browser model "tree"
+
+Before any server AI is asked, the button lets a small model named `tree` look at the photo **inside the visitor's
+own browser** (`public/assets/js/tree-model.js`, ONNX Runtime Web; files in `public/assets/models/`). If it is at
+least 90 % sure (`app_threshold` in `tree.labels.json`) and the species exists in the system (looked up by
+`admin/identify_match.php`, no AI), that answer is shown straight away: no upload, no cost, no server AI. Otherwise
+the photo goes to the server AI as described below. A form that asks for the full write-up (`data-detail="full"`)
+accepts the local answer only when the species is already catalogued, since `tree` knows names, not care texts.
+
+- **Coverage:** 273 species. On held-out GBIF photos, answers at >= 90 % confidence were right 97.5 % of the time
+  but covered only 7.5 % of photos (15 % for the 27 catalogue species) - so most requests still reach the server AI.
+  Photos taken in the exhibition may differ from GBIF's, so these numbers can be optimistic.
+- **Tests:** `python tests/tree_browser_check.py` (browser vs Python give the same answer; 60/60 and a probability
+  difference of at most 0.004 when written) and `python tests/tree_button_check.py` (the button's four paths).
+  Both need `ml/data_sea` and `ml/models`, so they are run by hand. The photo preparation in `tree-model.js`
+  deliberately reproduces PIL's filters: a plain browser canvas shrink moved probabilities by up to 0.15.
+- **First use:** the visitor downloads about 6 MB of model plus ONNX Runtime's ~11 MB WebAssembly once (then cached).
+- **Credits:** `public/assets/models/credits.csv` lists the photographers (CC-BY); the result panel links to it.
+
 ## Confidence percentage and second opinion
 
 The local model reports `confidence_pct` (0-100); the page shows it as e.g.
