@@ -153,6 +153,12 @@
       }
       // Every drafted field, in full — the admin reviews it all here before
       // deciding to copy it into the form.
+      var DETAIL_SOURCES = { catalogue: 'ข้อมูลที่บันทึกไว้ในระบบ', cache: 'ที่ AI เคยเขียนไว้แล้ว (เก็บไว้ใช้ซ้ำ)', generated: 'AI เขียนให้ใหม่ — อ่านตรวจก่อนใช้', present: 'AI เขียนให้ — อ่านตรวจก่อนใช้' };
+      if (result.details_status === 'failed') {
+        box.appendChild(el('p', 'field-hint field-hint-error', 'ยังสร้างรายละเอียดเพิ่มเติมไม่ได้ในขณะนี้ (AI ไม่พร้อม) — ลองกดอีกครั้งภายหลัง'));
+      } else if (DETAIL_SOURCES[result.details_status]) {
+        box.appendChild(el('p', 'field-hint', 'รายละเอียดเพิ่มเติมจาก: ' + DETAIL_SOURCES[result.details_status]));
+      }
       DETAIL_LABELS.forEach(function (pair) {
         var text = result[pair[0]];
         if (!text) return;
@@ -259,12 +265,16 @@
           var data = new FormData();
           data.append('csrf_token', tokenField.value);
           data.append('name_scientific', r.name);
+          data.append('want_details', '1'); // the details are written/looked up on the server every time
+          if (wrapper.dataset.detail === 'full') data.append('detail', 'full');
           return fetch(wrapper.dataset.endpoint.replace(/identify_tree\.php$/, 'identify_match.php'), { method: 'POST', body: data, credentials: 'same-origin', signal: abort.signal })
             .then(function (res) { return res.json(); })
             .then(function (m) {
               if (!m.ok) return null;
-              if (wrapper.dataset.detail === 'full' && !m.matched_species_id) return null;
-              return {
+              // A form that needs the full write-up for a NEW species only accepts the local answer if the details were produced.
+              var gotDetails = m.details_status === 'catalogue' || m.details_status === 'cache' || m.details_status === 'generated';
+              if (wrapper.dataset.detail === 'full' && !m.matched_species_id && !gotDetails) return null;
+              var local = {
                 is_plant: true, name_th: m.matched_species_name || '', name_common: '', name_scientific: r.name,
                 confidence: 'high', confidence_pct: Math.round(r.p * 100), description_th: '',
                 notes_th: 'ระบุโดยโมเดล tree ที่รันในเครื่องของคุณ (ไม่ได้ส่งรูปออกไปยังเซิร์ฟเวอร์ AI)',
@@ -272,6 +282,11 @@
                 matched_species_id: m.matched_species_id, matched_species_name: m.matched_species_name,
                 second_opinion: null, answered_by: 'tree', needs_review: false
               };
+              ['description_th', 'care_instructions', 'characteristics', 'properties', 'benefits', 'cautions', 'part_uses',
+               'category_code', 'category_name', 'subtype_ids', 'subtype_names', 'details_status', 'details_source'].forEach(function (k) {
+                if (m[k] !== undefined && m[k] !== null && !(k === 'description_th' && !m[k])) local[k] = m[k];
+              });
+              return local;
             });
         }).catch(function () { return null; }); // any trouble with the local model: use the server AI instead
       }

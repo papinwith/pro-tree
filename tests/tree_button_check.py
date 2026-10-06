@@ -5,6 +5,7 @@ endpoints (identify_match.php, identify_tree.php), then checks three situations:
   A  tree is >= 90 % sure and the species exists in the system  -> answered locally, the server AI is NOT called
   B  tree is unsure (< 50 %)                                      -> the photo goes to the server AI as before
   C  the form wants the full write-up and the species is unknown  -> falls through to the server AI
+  (plus the details of the answer every time: shown, or a notice that they could not be produced)
 Run by hand (needs ml/data_sea, ml/models and internet for the ONNX Runtime CDN):  python tests/tree_button_check.py
 """
 import csv
@@ -39,13 +40,19 @@ function log(m) { try { navigator.sendBeacon('/log', String(m)); } catch (e) {} 
 window.onerror = function (m, s, l) { log('error: ' + m + ' @' + l); };
 window.addEventListener('unhandledrejection', function (e) { log('rejection: ' + (e.reason && e.reason.message || e.reason)); });
 log('page loaded');
-window.__calls = []; window.__matchId = 7;
+window.__calls = []; window.__matchId = 7; window.__details = 'generated'; window.__wantedDetails = [];
 var realFetch = window.fetch;
 window.fetch = function (u, o) {
   u = String(u);
   if (u.indexOf('identify_match.php') >= 0) {
     window.__calls.push('match');
-    return Promise.resolve(new Response(JSON.stringify({ ok: true, matched_species_id: window.__matchId, matched_species_name: window.__matchId ? 'ต้นทดสอบในระบบ' : null })));
+    window.__wantedDetails.push(o && o.body && o.body.get ? o.body.get('want_details') : null);
+    var body = { ok: true, matched_species_id: window.__matchId, matched_species_name: window.__matchId ? 'ต้นทดสอบในระบบ' : null };
+    if (o && o.body && o.body.get && o.body.get('want_details') === '1') {
+      body.details_status = window.__details;
+      if (window.__details === 'generated') { body.description_th = 'คำอธิบายจากระบบ'; body.care_instructions = 'ดูแลทดสอบ'; body.benefits = 'ประโยชน์ทดสอบ'; }
+    }
+    return Promise.resolve(new Response(JSON.stringify(body)));
   }
   if (u.indexOf('identify_tree.php') >= 0) {
     window.__calls.push('server');
@@ -57,8 +64,8 @@ window.fetch = function (u, o) {
 <script src="/assets/js/tree-model.js"></script>
 <script src="/assets/js/ai-identify-button.js"></script>
 <script>
-async function scenario(photo, detail, matchId) {
-  window.__calls = []; window.__matchId = matchId;
+async function scenario(photo, detail, matchId, details) {
+  window.__calls = []; window.__matchId = matchId; window.__details = details || 'generated'; window.__wantedDetails = [];
   log('scenario start: ' + photo + ' detail=' + detail);
   var w = document.getElementById('w'), input = document.getElementById('image'), out = w.querySelector('[data-ai-output]');
   if (detail) w.dataset.detail = detail; else delete w.dataset.detail;
@@ -73,15 +80,17 @@ async function scenario(photo, detail, matchId) {
     if (out.querySelector('.flash') && !btn.disabled) break;
   }
   log('scenario end: calls=' + window.__calls.join(',') + ' text=' + out.textContent.slice(0, 80));
-  return { calls: window.__calls.slice(), text: out.textContent.slice(0, 400) };
+  return { calls: window.__calls.slice(), text: out.textContent.slice(0, 900), wanted: window.__wantedDetails.slice() };
 }
 (async function () {
   var cfg = await (await realFetch('/cfg.json')).json();
   var res = {};
   res.A = await scenario(cfg.sure, '', 7);
   res.B = await scenario(cfg.unsure, '', 7);
-  res.C = await scenario(cfg.sure, 'full', null);
-  res.D = await scenario(cfg.sure, 'full', 7);
+  res.C = await scenario(cfg.sure, 'full', null, 'generated');
+  res.D = await scenario(cfg.sure, 'full', 7, 'catalogue');
+  res.E = await scenario(cfg.sure, 'full', null, 'failed');
+  res.F = await scenario(cfg.sure, '', 7, 'failed');
   await fetch('/report', { method: 'POST', body: JSON.stringify(res) });
 })();
 </script>"""
@@ -178,10 +187,13 @@ def main() -> None:
 
     r = report["data"]
     checks = [
-        ("A  sure + known species -> answered locally, server AI not called", r["A"]["calls"] == ["match"] and "tree" in r["A"]["text"] and "ต้นทดสอบในระบบ" in r["A"]["text"]),
+        ("A  sure + known species -> answered locally, server AI not called, details shown", r["A"]["calls"] == ["match"] and "tree" in r["A"]["text"] and "ต้นทดสอบในระบบ" in r["A"]["text"]
+         and "ดูแลทดสอบ" in r["A"]["text"] and "ประโยชน์ทดสอบ" in r["A"]["text"] and r["A"]["wanted"] == ["1"]),
         ("B  unsure -> the server AI is asked", r["B"]["calls"] == ["server"] and "คำตอบจากเซิร์ฟเวอร์" in r["B"]["text"]),
-        ("C  full write-up wanted + species unknown -> falls through to the server AI", r["C"]["calls"] == ["match", "server"]),
+        ("C  full write-up wanted + species unknown + details produced -> answered locally with the details", r["C"]["calls"] == ["match"] and "ดูแลทดสอบ" in r["C"]["text"]),
         ("D  full write-up wanted + species known -> answered locally", r["D"]["calls"] == ["match"]),
+        ("E  full write-up wanted + species unknown + details could NOT be produced -> falls through to the server AI", r["E"]["calls"] == ["match", "server"]),
+        ("F  details could not be produced (simple form) -> still answered locally, with a visible notice", r["F"]["calls"] == ["match"] and "ยังสร้างรายละเอียดเพิ่มเติมไม่ได้" in r["F"]["text"]),
     ]
     ok = True
     for label, passed in checks:

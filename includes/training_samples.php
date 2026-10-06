@@ -38,11 +38,11 @@ function trainingSamplesDdl(string $driver): string
 /** Creates the table on first use, so an already-deployed database needs no manual migration. */
 function ensureTrainingSamplesTable(PDO $pdo): void
 {
-    static $done = [];
-    $key = spl_object_id($pdo);
-    if (!isset($done[$key])) {
+    static $done = null; // keyed by the PDO object itself - object ids are reused once a PDO is freed
+    $done ??= new WeakMap();
+    if (!isset($done[$pdo])) {
         $pdo->exec(trainingSamplesDdl((string) $pdo->getAttribute(PDO::ATTR_DRIVER_NAME)));
-        $done[$key] = true;
+        $done[$pdo] = true;
     }
 }
 

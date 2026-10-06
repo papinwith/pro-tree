@@ -4,6 +4,7 @@
 // match, so it is cheap. Same access rules as identify_tree.php.
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/plant_identify.php';
+require_once __DIR__ . '/../includes/species_details.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
@@ -41,8 +42,25 @@ $matched = findMatchingSpecies(
     ['name_scientific' => $name, 'name_th' => ''],
     identifyCached('species', AI_IDENTIFY_CACHE_SECONDS, fn() => db()->query('SELECT id, name, name_scientific FROM species ORDER BY name')->fetchAll())
 );
-matchJson(200, [
+$payload = [
     'ok' => true,
     'matched_species_id' => $matched ? (int) $matched['id'] : null,
     'matched_species_name' => $matched ? (string) $matched['name'] : null,
-]);
+];
+// The browser model only knows the name; the details (care, characteristics, ...) are filled in here, every time:
+// catalogued text, else the AI's earlier write-up for this species, else a fresh one.
+if (($_POST['want_details'] ?? '') === '1') {
+    $catalogue = null;
+    if (($_POST['detail'] ?? '') === 'full' && can('species.manage')) {
+        $catalogue = [
+            'categories' => identifyCached('categories', AI_IDENTIFY_CACHE_SECONDS, fn() => getAllCategories(db())),
+            'subtypes' => identifyCached('subtypes', AI_IDENTIFY_CACHE_SECONDS, fn() => getAllSubtypes(db())),
+        ];
+    }
+    $seed = normalizePlantIdentification(['is_plant' => true, 'name_scientific' => $name, 'name_th' => $payload['matched_species_name'] ?? '', 'confidence_pct' => 90]);
+    $done = completeWithDetails(db(), $seed, $catalogue, 45.0, null, $matched ? (int) $matched['id'] : null);
+    foreach (array_merge(speciesDetailKeys(), ['category_code', 'category_name', 'subtype_ids', 'subtype_names', 'details_status', 'details_source']) as $k) {
+        $payload[$k] = $done[$k] ?? null;
+    }
+}
+matchJson(200, $payload);

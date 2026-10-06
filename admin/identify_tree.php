@@ -11,6 +11,7 @@ $requestStartedAt = microtime(true);
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/plant_identify.php';
 require_once __DIR__ . '/../includes/training_samples.php';
+require_once __DIR__ . '/../includes/species_details.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
@@ -86,11 +87,15 @@ if (($_POST['detail'] ?? '') === 'full' && $speciesOk) {
 // what has already been spent — minus a little for matching the answer against
 // the catalogue afterwards — is the AI's budget.
 $budget = max(1.5, AI_IDENTIFY_MAX_SECONDS - (microtime(true) - $requestStartedAt) - 0.4);
+// The engines only have to NAME the plant (a short, quick answer); the details - care, characteristics, benefits, cautions...
+// - are then filled in every time by completeWithDetails(). Time is kept back for that step.
+$detailsReserve = canGenerateDetails() ? min(30.0, AI_IDENTIFY_MAX_SECONDS * 0.3) : 0.0;
+$budget = max(1.5, $budget - $detailsReserve);
 // The nursery's own species help the model settle look-alikes — but only if the
 // list is already cached: reading it from the database here would spend ~1 s of
 // the AI's time.
 $imageBytes = (string) file_get_contents($_FILES['image']['tmp_name']);
-$outcome = identifyPlantFromImage($imageBytes, $imageType['mime'], $catalogue, $budget, identifyCachedIfFresh('species', AI_IDENTIFY_CACHE_SECONDS));
+$outcome = identifyPlantFromImage($imageBytes, $imageType['mime'], null, $budget, identifyCachedIfFresh('species', AI_IDENTIFY_CACHE_SECONDS));
 if (!$outcome['ok']) {
     identifyJson(!empty($outcome['timed_out']) ? 504 : 502, ['ok' => false, 'timed_out' => !empty($outcome['timed_out']), 'error' => $outcome['error']]);
 }
@@ -104,4 +109,7 @@ $matched = $result['is_plant']
     : null;
 $result['matched_species_id'] = $matched ? (int) $matched['id'] : null;
 $result['matched_species_name'] = $matched ? (string) $matched['name'] : null;
+// Details every time: the catalogued text, else what the AI wrote before, else a fresh AI write-up (see species_details.php).
+$detailsBudget = max(4.0, AI_IDENTIFY_MAX_SECONDS - (microtime(true) - $requestStartedAt) - 0.5);
+$result = completeWithDetails(db(), $result, $catalogue, $detailsBudget, null, $matched ? (int) $matched['id'] : null);
 identifyJson(200, ['ok' => true, 'result' => $result]);

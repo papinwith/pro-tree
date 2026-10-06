@@ -17,6 +17,14 @@ if (($argv[1] ?? '') === '--case') {
     require __DIR__ . '/../includes/plant_identify.php';
     require __DIR__ . '/../includes/translation.php';
     $jpeg = "\xFF\xD8\xFF\xE0" . str_repeat('x', 200);
+    if ($case === 'identify_with_details') {
+        require __DIR__ . '/../includes/species_details.php';
+        $pdo = new PDO('sqlite::memory:', null, null, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]);
+        $o = identifyPlantFromImage($jpeg, 'image/jpeg', null, 60);
+        $r = completeWithDetails($pdo, $o['result'] ?? ['is_plant' => false], null, 40);
+        echo json_encode(['ai_enabled' => AI_ENABLED, 'ok' => $o['ok'], 'result' => $r], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
     if ($case === 'translate') {
         echo json_encode(['ai_enabled' => AI_ENABLED, 'translation' => aiTranslateFields(['name' => 'ต้นพิกุล'], ['en'])], JSON_UNESCAPED_UNICODE);
     } else {
@@ -49,6 +57,12 @@ if (str_contains($path, ':generateContent')) {
     $body = json_decode(file_get_contents('php://input'), true);
     $hasImage = false;
     foreach ($body['contents'][0]['parts'] ?? [] as $p) { if (isset($p['inline_data'])) $hasImage = true; }
+    $promptText = $body['contents'][0]['parts'][0]['text'] ?? '';
+    if (!$hasImage && str_contains($promptText, 'care_instructions')) {
+        $text = json_encode(['description_th' => 'คำอธิบายทั่วไป', 'care_instructions' => 'รดน้ำสัปดาห์ละครั้ง', 'characteristics' => 'ไม้ยืนต้น', 'properties' => 'มีสาร X', 'benefits' => 'ให้ร่มเงา', 'cautions' => 'เมล็ดมีพิษ', 'part_uses' => 'ดอก: ชา'], JSON_UNESCAPED_UNICODE);
+        echo json_encode(['candidates' => [['content' => ['parts' => [['text' => $text]]]]]]);
+        return;
+    }
     $text = $hasImage
         ? json_encode(['is_plant' => true, 'name_th' => 'ราชพฤกษ์', 'name_scientific' => 'Cassia fistula', 'confidence_pct' => 70, 'description_th' => 'คำอธิบายจาก Gemini', 'alternatives' => []], JSON_UNESCAPED_UNICODE)
         : json_encode(['en' => ['name' => 'Translated by Gemini']]);
@@ -137,6 +151,19 @@ check('everything off: AI is reported as disabled', ($r['ai_enabled'] ?? true) =
 check('translation: Ollama down, Gemini translates instead', ($r['translation']['en']['name'] ?? '') === 'Translated by Gemini', json_encode($r, JSON_UNESCAPED_UNICODE));
 [$r] = scenario('translate', []);
 check('translation: Ollama down and no Gemini key: quietly nothing (the page keeps the Thai text)', array_key_exists('translation', $r) && $r['translation'] === null, json_encode($r));
+
+// ---- details are filled in every time, whichever engine named the plant ----
+[$r, $calls] = scenario('identify_with_details', $both);
+$res = $r['result'] ?? [];
+check('Ollama down: the answer comes with the full write-up (care, characteristics, benefits, cautions...) written by Gemini',
+    ($r['ok'] ?? false) === true && ($res['details_status'] ?? '') === 'generated' && ($res['details_source'] ?? '') === 'gemini'
+    && ($res['care_instructions'] ?? '') === 'รดน้ำสัปดาห์ละครั้ง' && ($res['cautions'] ?? '') === 'เมล็ดมีพิษ', json_encode($res, JSON_UNESCAPED_UNICODE));
+check('...and Gemini was asked twice: once to name the plant (with the photo), once to write the details (text only)',
+    count(array_filter($calls, fn($c) => str_contains($c, 'generateContent'))) === 2, implode(',', $calls));
+[$r] = scenario('identify_with_details', ['PLANTNET_API_KEY' => 'p-key-1234567890']);
+$res = $r['result'] ?? [];
+check('only Pl@ntNet available (names only): the details cannot be written, and the answer still goes out marked as such',
+    ($r['ok'] ?? false) === true && ($res['name_scientific'] ?? '') === 'Cassia fistula' && ($res['details_status'] ?? '') === 'failed' && ($res['care_instructions'] ?? 'x') === '', json_encode($res, JSON_UNESCAPED_UNICODE));
 
 echo "\n$pass passed, $fail failed\n";
 exit($fail === 0 ? 0 : 1);

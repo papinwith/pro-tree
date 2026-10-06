@@ -75,6 +75,28 @@ nursery stocks; the wording tells the model to ignore the list unless the photo
 clearly matches. An answer of "Unknown ..." / "ไม่ทราบ" is treated as "could not
 tell" instead of being shown as a name.
 
+## Details every time
+
+Whichever engine names the plant - tree in the browser, Qwen, Pl@ntNet or Gemini - the answer always comes with the
+long write-up (description, care, characteristics, properties, benefits, cautions, uses of each part). The engines now
+only have to give the **name** (a short, quick answer, so Qwen is faster than when it also wrote everything);
+`completeWithDetails()` in `includes/species_details.php` then fills the details, looking in this order:
+
+1. the species already **catalogued** in the system (text people wrote and approved);
+2. the **cache** (`species_details_cache`, created on first use) of what the AI wrote for that scientific name before;
+3. a **fresh AI write-up**, Gemini if `GEMINI_API_KEY` is set (about 5 s), else the local text model (measured at about
+   80 s on a 4 GB GPU, so with only Ollama it may not finish inside the time limit), then cached.
+
+A write-up describes the species, not the photo, so it is reused for every photo of it. The in-browser model gets its
+details through `admin/identify_match.php?want_details=1` (the cache makes repeat species instant). If no engine can write
+the details, the answer is still returned with `details_status: "failed"` and the page says so.
+
+Things to know: the text is AI-written and can be wrong (a trial of the local model said teak leaves are used as
+herbal medicine - doubtful), and **a cached text is reused for every later photo of that species**, so a mistake spreads;
+the page tells the reader to check it before saving, and a species saved in the system takes precedence over the cache.
+To discard a bad cached text, delete its row: `DELETE FROM species_details_cache WHERE name_scientific = 'Tectona grandis'`.
+Tests: `php tests/species_details_test.php` (21 checks) and the details cases in `tests/failover_test.php`.
+
 ## The in-browser model "tree"
 
 Before any server AI is asked, the button lets a small model named `tree` look at the photo **inside the visitor's
