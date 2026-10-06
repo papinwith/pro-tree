@@ -207,6 +207,21 @@
       output.appendChild(box);
     }
 
+    // The photo last sent to the server AI, so that "use this result" can offer it to tree as a new example.
+    var lastUploaded = null;
+    function confirmAsExample(result) {
+      if (!lastUploaded || !result || result.answered_by === 'tree' || !result.name_scientific) return;
+      var form = wrapper.closest('form'), tokenField = form && form.querySelector('input[name="csrf_token"]');
+      if (!tokenField) return;
+      var data = new FormData();
+      data.append('csrf_token', tokenField.value);
+      data.append('name_scientific', result.name_scientific);
+      data.append('image', lastUploaded, 'photo.jpg');
+      fetch(wrapper.dataset.endpoint.replace(/identify_tree\.php$/, 'training_sample_add.php'), { method: 'POST', body: data, credentials: 'same-origin' })
+        .catch(function () {}); // best effort: learning must never get in the admin's way
+    }
+    wrapper.addEventListener('ai-identify:apply', function (e) { confirmAsExample(e.detail && e.detail.result); });
+
     function sourceBlob() {
       if (input.files && input.files.length > 0) return Promise.resolve(input.files[0]);
       return fetch(previewImg().getAttribute('src'), { credentials: 'same-origin' }).then(function (r) {
@@ -269,6 +284,7 @@
                 var data = new FormData();
                 data.append('csrf_token', tokenField.value);
                 data.append('image', blob, 'photo.jpg');
+                lastUploaded = blob;
                 if (wrapper.dataset.detail === 'full') data.append('detail', 'full');
                 return fetch(wrapper.dataset.endpoint, { method: 'POST', body: data, credentials: 'same-origin', signal: abort.signal });
               })

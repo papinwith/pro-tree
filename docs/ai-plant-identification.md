@@ -94,6 +94,25 @@ accepts the local answer only when the species is already catalogued, since `tre
 - **First use:** the visitor downloads about 6 MB of model plus ONNX Runtime's ~11 MB WebAssembly once (then cached).
 - **Credits:** `public/assets/models/credits.csv` lists the photographers (CC-BY); the result panel links to it.
 
+## Teaching "tree" from the teachers' answers
+
+When tree is not sure and the server AI is asked, the outcome can become a training photo (`includes/training_samples.php`,
+table `training_samples`, created on first use):
+
+| Situation | Stored as |
+|---|---|
+| Qwen and the second teacher (Pl@ntNet, else Gemini) name the same species | **approved**, automatically |
+| they disagree | **pending** - a person decides on `admin/training_samples.php` (nav: ตัวอย่างสอน AI) |
+| an admin presses "use this result" | **approved** (the photo is re-sent to `admin/training_sample_add.php`) |
+| only one teacher answered | not stored |
+
+Photos tree answered by itself are not stored (no new information). Pending queue is capped at 300. Approved photos
+are downloaded with `ml/pull_feedback.py` through `admin/training_samples_export.php`, which is off unless the host sets
+`TRAINING_EXPORT_TOKEN` (24+ characters) and answers 404 without it. Retraining and publishing are manual, and
+`ml/publish_model.py` refuses a model whose answers at the 90 % gate are not right at least 90 % of the time - see
+`ml/README.md`. Risk to know: two teachers can agree and still be wrong, and an admin who does not know the plant can
+approve a mistake; wrong labels make tree worse, so reject what you are unsure of.
+
 ## Confidence percentage and second opinion
 
 The local model reports `confidence_pct` (0-100); the page shows it as e.g.

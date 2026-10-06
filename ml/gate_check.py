@@ -20,20 +20,15 @@ from torchvision import models, transforms as T
 ROOT = Path(__file__).resolve().parent
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--name", default="tree_sea")
-    ap.add_argument("--species", default=str(ROOT / "species_sea_fetched.csv"))
-    ap.add_argument("--data", default=str(ROOT / "data_sea"))
-    ap.add_argument("--target", type=float, default=0.90, help="required accuracy of the answers the model gives")
-    args = ap.parse_args()
-    data = Path(args.data)
-
+def evaluate(name: str, species: str, data_dir: str):
+    """Asks the trained model about its validation and test photos. Returns (val, test, catalogue) where val/test are
+    lists of (confidence, was_right, true_species) and catalogue is the set of species named in ml/species.csv."""
+    data = Path(data_dir)
     spec = importlib.util.spec_from_file_location("train_tree", ROOT / "03_train_tree.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
 
-    meta = json.load(open(ROOT / "models" / f"{args.name}.labels.json", encoding="utf-8"))
+    meta = json.load(open(ROOT / "models" / f"{name}.labels.json", encoding="utf-8"))
     classes = meta["classes"]
     cidx = {c: i for i, c in enumerate(classes)}
     rows = [r for r in csv.DictReader(open(data / "images.csv", encoding="utf-8")) if r["gbif_label"] in cidx]
@@ -41,7 +36,7 @@ def main() -> None:
 
     net = models.mobilenet_v3_small()
     net.classifier[3] = nn.Linear(net.classifier[3].in_features, len(classes))
-    net.load_state_dict(torch.load(ROOT / "models" / f"{args.name}.pt", map_location="cpu")["state_dict"])
+    net.load_state_dict(torch.load(ROOT / "models" / f"{name}.pt", map_location="cpu")["state_dict"])
     net.eval()
     tf = T.Compose([T.Resize(256), T.CenterCrop(224), T.ToTensor(), T.Normalize(meta["mean"], meta["std"])])
 
@@ -58,6 +53,18 @@ def main() -> None:
 
     val, test = run(parts["val"]), run(parts["test"])
     catalogue = {" ".join(r["scientific"].split()[:2]) for r in csv.DictReader(open(ROOT / "species.csv", encoding="utf-8-sig"))}
+
+    return val, test, catalogue
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--name", default="tree_sea")
+    ap.add_argument("--species", default=str(ROOT / "species_sea_fetched.csv"))
+    ap.add_argument("--data", default=str(ROOT / "data_sea"))
+    ap.add_argument("--target", type=float, default=0.90, help="required accuracy of the answers the model gives")
+    args = ap.parse_args()
+    val, test, catalogue = evaluate(args.name, args.species, args.data)
 
     def table(label, res):
         print(f"\n{label}: {len(res)} photos, top-1 {sum(ok for _, ok, _ in res) / len(res):.1%}")

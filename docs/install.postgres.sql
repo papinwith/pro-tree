@@ -125,6 +125,25 @@ CREATE TRIGGER trg_settings_updated_at BEFORE UPDATE ON settings
     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- ---------------------------------------------------------------
+-- Photos that teach the local "tree" model (includes/training_samples.php).
+-- Created automatically the first time it is needed, so an existing
+-- database does not have to be migrated by hand; listed here for new installs.
+-- ---------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS training_samples (
+    id              BIGSERIAL PRIMARY KEY,
+    image_hash      VARCHAR(40) NOT NULL UNIQUE,
+    name_scientific VARCHAR(160) NOT NULL,
+    status          VARCHAR(10) NOT NULL DEFAULT 'pending',  -- pending | approved | rejected
+    source          VARCHAR(20) NOT NULL,                    -- teachers | admin
+    teachers        VARCHAR(80) NULL,
+    mime            VARCHAR(40) NOT NULL,
+    image_b64       TEXT NOT NULL,
+    created_by      INTEGER NULL,
+    created_at      TIMESTAMP NOT NULL DEFAULT now(),
+    reviewed_by     INTEGER NULL
+);
+
+-- ---------------------------------------------------------------
 -- Categories
 -- ---------------------------------------------------------------
 CREATE TABLE categories (

@@ -23,6 +23,7 @@ if (can('reports.export')) $reportLinks[] = ['reports.php', 'รายงาน'
 $systemLinks = [];
 if (can('settings.manage')) $systemLinks[] = ['settings.php', 'ตั้งค่า'];
 if (can('settings.manage')) $systemLinks[] = ['backup.php', 'สำรองข้อมูล'];
+if (can('species.manage')) $systemLinks[] = ['training_samples.php', 'ตัวอย่างสอน AI'];
 if (can('admin.manage')) $systemLinks[] = ['users.php', 'ผู้ใช้งาน'];
 
 $navGroups = [

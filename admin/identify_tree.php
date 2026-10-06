@@ -10,6 +10,7 @@
 $requestStartedAt = microtime(true);
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/plant_identify.php';
+require_once __DIR__ . '/../includes/training_samples.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
@@ -88,12 +89,16 @@ $budget = max(1.5, AI_IDENTIFY_MAX_SECONDS - (microtime(true) - $requestStartedA
 // The nursery's own species help the model settle look-alikes — but only if the
 // list is already cached: reading it from the database here would spend ~1 s of
 // the AI's time.
-$outcome = identifyPlantFromImage((string) file_get_contents($_FILES['image']['tmp_name']), $imageType['mime'], $catalogue, $budget, identifyCachedIfFresh('species', AI_IDENTIFY_CACHE_SECONDS));
+$imageBytes = (string) file_get_contents($_FILES['image']['tmp_name']);
+$outcome = identifyPlantFromImage($imageBytes, $imageType['mime'], $catalogue, $budget, identifyCachedIfFresh('species', AI_IDENTIFY_CACHE_SECONDS));
 if (!$outcome['ok']) {
     identifyJson(!empty($outcome['timed_out']) ? 504 : 502, ['ok' => false, 'timed_out' => !empty($outcome['timed_out']), 'error' => $outcome['error']]);
 }
 
 $result = $outcome['result'];
+// Learning for the local "tree" model: two teachers agreeing -> kept as an approved example; disagreeing -> queued for a
+// person (admin/training_samples.php). Never affects the answer returned below.
+recordTrainingSampleFromResult(db(), $imageBytes, $imageType['mime'], $result, isset($_SESSION['admin_id']) ? (int) $_SESSION['admin_id'] : null);
 $matched = $result['is_plant']
     ? findMatchingSpecies(null, $result, identifyCached('species', AI_IDENTIFY_CACHE_SECONDS, fn() => db()->query('SELECT id, name, name_scientific FROM species ORDER BY name')->fetchAll()))
     : null;
