@@ -1,6 +1,6 @@
 # ml/ - training the "tree" plant model
 
-The website's local model `tree` (MobileNetV3-Small, 273 species) is trained here, on this machine, and published to
+The website's local model `tree` (MobileNetV3-Small, 1,065 Thai species) is trained here, on this machine, and published to
 `public/assets/models/`, where it runs inside the visitor's browser. **Teachers** (Qwen on Ollama, Pl@ntNet, Gemini) are
 only asked when `tree` is not sure; their agreed answers come back as new training photos. Nothing changes the model
 by itself - you retrain and publish by hand, and publishing is refused unless the new model is good enough.

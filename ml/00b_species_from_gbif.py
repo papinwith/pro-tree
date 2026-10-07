@@ -38,13 +38,15 @@ def main() -> None:
     ap.add_argument("--out", default="ml/species_sea.csv")
     ap.add_argument("--min-photos", type=int, default=120, help="skip species with fewer open photos in the chosen countries")
     ap.add_argument("--include", default="", help="CSV (with a scientific column) of species that must be in the list, e.g. ml/species.csv")
+    ap.add_argument("--thai-only", action="store_true", help="only species photographed in Thailand itself (no neighbouring countries)")
     args = ap.parse_args()
 
     counts = {}
     for k, c in facet(PRIMARY, args.count * 2):
         counts[k] = c
-    for k, c in facet(PRIMARY + NEIGHBOURS, args.count * 3):
-        counts.setdefault(k, c)
+    if not args.thai_only:
+        for k, c in facet(PRIMARY + NEIGHBOURS, args.count * 3):
+            counts.setdefault(k, c)
     keys = [k for k in counts if counts[k] >= args.min_photos]
 
     def describe(k):

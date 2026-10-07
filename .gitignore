@@ -37,3 +37,5 @@ ml/data_sea_fetch.log
 ml/species_sea.csv.bak
 ml/train_monitor.py
 ml/train_monitor.html
+ml/data_th/
+ml/data_th_fetch.log

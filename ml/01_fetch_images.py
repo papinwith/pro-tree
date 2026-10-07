@@ -17,6 +17,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import threading
+
 import requests
 from PIL import Image
 
@@ -83,6 +85,7 @@ def main() -> None:
     ap.add_argument("--species", default=str(ROOT / "species.csv"), help="species CSV (needs a scientific column; taxon_key is used if present)")
     ap.add_argument("--data", default=str(DATA), help="folder for photos and images.csv")
     ap.add_argument("--threads", type=int, default=16)
+    ap.add_argument("--species-parallel", type=int, default=1, help="species fetched at the same time")
     args = ap.parse_args()
 
     DATA = Path(args.data)
@@ -94,21 +97,23 @@ def main() -> None:
     for r in rows:
         have[r["gbif_label"]] = have.get(r["gbif_label"], 0) + 1
 
-    for sp in species:
+    lock = threading.Lock()
+
+    def process(sp):
         name = sp["scientific"]
         # genus + species only, e.g. "Cassia fistula"
         binomial = " ".join(name.split()[:2])
         if have.get(binomial, 0) >= args.per_species:
             print(f"skip   {binomial}: already {have[binomial]}")
-            continue
+            return
         try:
             key = int(sp["taxon_key"]) if sp.get("taxon_key") else with_retries(taxon_key, binomial.replace(" sp.", ""))  # "Vanda sp." -> whole genus
         except requests.RequestException as e:
             print(f"FAILED {binomial}: {type(e).__name__} - run the script again to retry")
-            continue
+            return
         if key is None:
             print(f"NOTFND {binomial}: not found in GBIF")
-            continue
+            return
         out_dir = DATA / "raw" / slug(binomial)
         out_dir.mkdir(parents=True, exist_ok=True)
         got = have.get(binomial, 0)
@@ -117,7 +122,7 @@ def main() -> None:
         try:
             for c in photo_urls(key, args.per_species):
                 if c[3] in known_sources:
-                    continue
+                    return
                 cands.append(c)
                 if len(cands) >= args.per_species * 3:
                     break
@@ -125,11 +130,18 @@ def main() -> None:
             print(f"  {binomial}: photo list interrupted ({type(e).__name__}); using the {len(cands)} found")
 
         def grab(c):
-            try:
-                resp = requests.get(c[0], headers=HEADERS, timeout=15)
-                resp.raise_for_status()
-                img = Image.open(io.BytesIO(resp.content)).convert("RGB")
-            except Exception:
+            img = None
+            # iNaturalist's "original" files are often 10+ MB; its "medium" copy (500 px) is all we keep anyway (thumbnail below)
+            urls = [c[0].replace("/original.", "/medium.", 1), c[0]] if "inaturalist-open-data" in c[0] and "/original." in c[0] else [c[0]]
+            for url in urls:
+                try:
+                    resp = requests.get(url, headers=HEADERS, timeout=15)
+                    resp.raise_for_status()
+                    img = Image.open(io.BytesIO(resp.content)).convert("RGB")
+                    break
+                except Exception:
+                    return
+            if img is None:
                 return None
             if min(img.size) < args.min_side:
                 return None
@@ -137,19 +149,29 @@ def main() -> None:
             return img
 
         with ThreadPoolExecutor(max_workers=args.threads) as pool:
-            for c, img in zip(cands, pool.map(grab, cands)):
-                if img is None or got >= args.per_species:
-                    continue
-                path = out_dir / f"{got:03d}.jpg"
-                img.save(path, quality=90)
-                rows.append({"path": path.relative_to(DATA).as_posix(), "gbif_label": binomial, "license": c[1], "creator": c[2], "source_url": c[3]})
-                got += 1
+            step = args.threads * 2
+            for i in range(0, len(cands), step):      # stop downloading as soon as the species has enough photos
+                if got >= args.per_species:
+                    break
+                chunk = cands[i:i + step]
+                for c, img in zip(chunk, pool.map(grab, chunk)):
+                    if img is None or got >= args.per_species:
+                        continue
+                    path = out_dir / f"{got:03d}.jpg"
+                    img.save(path, quality=90)
+                    with lock:
+                        rows.append({"path": path.relative_to(DATA).as_posix(), "gbif_label": binomial, "license": c[1], "creator": c[2], "source_url": c[3]})
+                    got += 1
         have[binomial] = got
         print(f"fetched {binomial}: {got} photos")
-        with open(index_path, "w", encoding="utf-8", newline="") as fh:
-            w = csv.DictWriter(fh, fieldnames=["path", "gbif_label", "license", "creator", "source_url"])
-            w.writeheader()
-            w.writerows(rows)
+        with lock:
+            with open(index_path, "w", encoding="utf-8", newline="") as fh:
+                w = csv.DictWriter(fh, fieldnames=["path", "gbif_label", "license", "creator", "source_url"])
+                w.writeheader()
+                w.writerows(rows)
+
+    with ThreadPoolExecutor(max_workers=args.species_parallel) as species_pool:
+        list(species_pool.map(process, species))
 
     print(f"\n{len(rows)} photos total in {index_path}")
 
