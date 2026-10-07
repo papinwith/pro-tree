@@ -122,7 +122,7 @@ def main() -> None:
         try:
             for c in photo_urls(key, args.per_species):
                 if c[3] in known_sources:
-                    return
+                    continue
                 cands.append(c)
                 if len(cands) >= args.per_species * 3:
                     break
@@ -140,7 +140,7 @@ def main() -> None:
                     img = Image.open(io.BytesIO(resp.content)).convert("RGB")
                     break
                 except Exception:
-                    return
+                    continue
             if img is None:
                 return None
             if min(img.size) < args.min_side:

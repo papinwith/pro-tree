@@ -118,6 +118,8 @@ def main() -> None:
                     help="teacher: learn from teacher_labels.csv; gbif: learn straight from the GBIF names in images.csv (no teacher)")
     ap.add_argument("--species", default=str(ROOT / "species.csv"), help="species CSV listing the classes")
     ap.add_argument("--data", default=str(DATA), help="folder holding the photos and the CSV")
+    ap.add_argument("--boost", default="", help="species CSV whose photos are shown to the student more often (e.g. the garden's own species)")
+    ap.add_argument("--boost-factor", type=int, default=3, help="how many times each --boost photo appears per epoch")
     ap.add_argument("--workers", type=int, default=4, help="photo-loading processes")
     ap.add_argument("--progress", default="", help="progress JSON for ml/train_monitor.py (default: <data>/progress.json)")
     args = ap.parse_args()
@@ -146,6 +148,10 @@ def main() -> None:
         return out
 
     train = load(parts["train"], "gbif_label" if args.source == "gbif" else "teacher_label")  # the student studies from the teacher (or the GBIF names)
+    if args.boost:
+        boosted = {cidx[" ".join(r["scientific"].split()[:2])] for r in csv.DictReader(open(args.boost, encoding="utf-8-sig")) if " ".join(r["scientific"].split()[:2]) in cidx}
+        train += [t for t in train if t[1] in boosted] * (args.boost_factor - 1)
+        print(f"boosted {len(boosted)} species x{args.boost_factor}")
     val = load(parts["val"], "gbif_label")  # exams use the independent answer key
     test = load(parts["test"], "gbif_label")
     print(f"student trains on {len(train)} photos, labels={args.labels} ({len(parts['train']) - len(train)} dropped)")
